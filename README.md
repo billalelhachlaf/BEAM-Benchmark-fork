@@ -3,13 +3,13 @@
 This repository contains the **code, data, and preprocessing pipeline** for the benchmark introduced in the paper:
 **BEAM : Un premier benchmark pour l’alignement des microdonnées du web avec les graphes de connaissances** (📄 link to be added).
 
-The benchmark aligns **Web Data Commons (WDC) macrodata** with **Wikidata** using **key-based matching** (e.g., IATA codes for airports, ISBN for books). Unlike synthetic benchmarks (e.g., DBP15K, OpenEA datasets), MEAB preserves the **noise, heterogeneity, and incompleteness** of real-world data, offering a more realistic evaluation for entity alignment (EA).
+The benchmark aligns **Web Data Commons (WDC) microdata** with **Wikidata** using **key-based matching** (e.g., IATA codes for airports, ISBN for books). Unlike usual benchmarks (e.g., DBP15K, OpenEA datasets), BEAM preserves the **noise, heterogeneity, and incompleteness** of real-world data, offering a more realistic evaluation for entity alignment (EA).
 
 Our contributions:
 
-* 🏗️ Provide **class-specific datasets** (currently: *airports* and *books*).
+* 🏗️ Provide **class-specific datasets** (currently: *airports* and *books*; the Github repo will include soon other classes).
 * ⚙️ Include a **preprocessing pipeline** to reproduce or extend the benchmark to new classes.
-* 📊 Evaluate several **EA models** (MTransE, AliNet, AlignE, AttrE, GCNAlign, BootEA) under the same hyperparameters as OpenEA.
+* 📊 Evaluate several **EA models** (MTransE, AliNet, AlignE, GCNAlign, BootEA) under the same hyperparameters as OpenEA.
 * 🔗 Supply **ground truth alignments** via *key-based matching* (IATA/ISBN), instead of rare or noisy `owl:sameAs` links.
 * 🌐 Release the dataset under FAIR principles — Findable, Accessible, Interoperable, Reusable.
 
@@ -67,22 +67,15 @@ The pipeline includes:
 8. **Entity linking**: generate ground-truth alignment based on keys (IATA/ISBN).
 
 ---
-Perfect — thanks for clarifying! Since you want to keep the README as you’ve drafted it, but **add the detailed preprocessing steps (Original + SQL)**, we can slot them right after the **Pipeline Overview** section, preserving your style.
-
-Here’s how the continuation should look (you can paste it directly under your “Pipeline Overview” section):
-
----
 
 ## 🔄 Preprocessing Steps
 
 Below we illustrate the main preprocessing stages for **Airports** (Books follow the same logic, with ISBN instead of IATA).
-Each step has both the ✅ **original approach** (bash/Python/awk/grep) and the 🐘 **PostgreSQL version**.
+Each step has both the **bash approach** (bash/Python/awk/grep) and the 🐘 **PostgreSQL version**.
 
 ---
 
 ### 📁 1. Extract Initial Triples
-
-✅ Original:
 
 ```bash
 python preprocessing/WDC/create_wdc_triples.py 
@@ -103,8 +96,6 @@ COPY wdc_triples_raw FROM '/path/to/wdc_airport_related_triples.txt' DELIMITER E
 ---
 
 ### 📁 2. Clean and Filter (remove logos, images, sameAs, etc.)
-
-✅ Original:
 
 ```bash
 grep '^_:' wdc_airport_related_triples.txt | \
@@ -130,8 +121,6 @@ WHERE subject LIKE '_:%'
 
 ### 📁 3. Keep Only Type Airport
 
-✅ Original:
-
 ```bash
 awk -F'\t' '$2 ~ /type/ && $3 !~ /schema.org\/Airport/ {print $1}' cleaned_depth0_wdc.txt | sort | uniq > bad_ids.txt
 grep -vFf bad_ids.txt cleaned_depth0_wdc.txt > cleaned2_depth0.txt
@@ -155,8 +144,6 @@ WHERE subject NOT IN (SELECT subject FROM non_airports);
 ---
 
 ### 📁 4. Remove Low-Frequency Entities
-
-✅ Original:
 
 ```bash
 cut -f1 cleaned2_depth0.txt | sort | uniq -c | sort -n > freq.txt
@@ -191,13 +178,9 @@ WHERE subject NOT IN (SELECT subject FROM min_ids);
 * **Step 9:** drop subjects with only 2–3 triples.
 * **Step 10:** add more depth if there is linked entities in the same folder.
 
-✅ Each step uses `grep`, `awk`, and filtering commands.
-🐘 Equivalent SQL tables are built step-by-step (see paper and scripts for full details).
-
 ---
 
 ### 📁 11. Wikidata Extraction and Filtering
-
 
 ```bash
 python preprocessing/Wikidata/d1_wiki.py  #get triples
@@ -239,37 +222,30 @@ python preprocessing/entity_linking/get_new_ent_iata_links.py
 | Wikidata (airport)      | 61,090            | 163,517            |       |
 | Ground truth alignments | –                 | –                  | 2,526 |
 
-Similar statistics are available for the *books* class.
+Similar statistics are available for the *books* class in the original article.
 
 ---
 
 ## 📈 Model Evaluation
 
-We tested six representative EA models (all from [OpenEA](https://github.com/nju-websoft/OpenEA)):
+We tested five representative EA models (all from [OpenEA](https://github.com/nju-websoft/OpenEA)):
 
 * **MTransE** (translation-based)
 * **AliNet** (multi-hop neighborhood attention)
 * **AlignE** (attribute embedding)
-* **AttrE** (attribute character embedding)
 * **GCNAlign** (graph convolutional alignment)
 * **BootEA** (bootstrapping with iterative refinement)
 
-On curated datasets like DBP15K, models reach Hits\@5 of **40–60%**.
-On MEAB, performance drops to **\~1–2% Hits\@5**, confirming the difficulty of aligning noisy, semi-structured web macrodata.
+On structured datasets like DBP15K, models reach Hits\@5 of **40–60%**.
+On BEAM, performance drops to **\~1–2% Hits\@5**, confirming the difficulty of aligning noisy, semi-structured web microdata.
 
 ---
 
 ## 📌 Notes
 
 * Current benchmark covers **Airports** and **Books**; the pipeline generalizes to new classes.
-* Ground truth is constructed via **key-based matching** (IATA / ISBN), not `owl:sameAs`.
+* Ground truth is constructed via **key-based matching** (IATA / ISBN), not `sameAs`.
 * Preprocessing deliberately preserves **noise, duplicates, and heterogeneity** to reflect reality.
-
----
-
-## 📄 License
-
-This project is released under the **CC-BY License**, consistent with the data sources. (to be modified)
 
 ---
 

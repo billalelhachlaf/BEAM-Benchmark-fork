@@ -129,7 +129,7 @@ A visualization and navigation tool for exploring the datasets:
 │  • train_links (70%)  - Training entity alignments              │
 │  • test_links (20%)   - Testing entity alignments               │
 │  • valid_links (10%)  - Validation entity alignments            │
-│  • 5 different random splits for cross-validation              │
+│  • 5 different random splits for cross-validation               │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

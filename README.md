@@ -373,23 +373,6 @@ The preprocessing pipeline consists of multiple stages to clean and prepare the 
 
 ---
 
-## 🧪 Experimental Results
-
-### Performance on BEAM vs. DBP15K
-
-| Model      | DBP15K Hits@1 | DBP15K Hits@5 | BEAM Hits@1 | BEAM Hits@5 |
-|------------|---------------|---------------|-------------|-------------|
-| MTransE    | 30.8%         | 61.4%         | ~0.5%       | ~1.2%       |
-| AliNet     | 39.2%         | 74.5%         | ~0.8%       | ~2.1%       |
-| AlignE     | 47.2%         | 79.2%         | ~1.1%       | ~2.8%       |
-| GCNAlign   | 41.3%         | 74.4%         | ~0.9%       | ~2.3%       |
-| BootEA     | 62.9%         | 84.8%         | ~1.5%       | ~3.5%       |
-| BERT-INT   | 64.3%         | 86.2%         | ~2.1%       | ~4.8%       |
-
-**Key Observation:** Performance drops dramatically on BEAM compared to DBP15K, confirming that real-world noisy microdata is significantly more challenging than clean, structured datasets.
-
----
-
 ## 🛠️ Troubleshooting
 
 ### Common Issues
@@ -422,20 +405,6 @@ The preprocessing pipeline consists of multiple stages to clean and prepare the 
 * **Scalability**: The pipeline is designed to extend to new classes (e.g., movies, restaurants, products) by modifying the class filters.
 * **Reproducibility**: All preprocessing steps are documented and can be reproduced from raw data sources.
 
----
-
-## 📚 Citation
-
-If you use this benchmark in your research, please cite:
-
-```bibtex
-@inproceedings{beam2026,
-  title={BEAM: Un premier benchmark pour l'alignement des microdonnées du web avec les graphes de connaissances},
-  author={[Authors]},
-  booktitle={ACM Symposium on Applied Computing (SAC)},
-  year={2026}
-}
-```
 
 ---
 
@@ -465,8 +434,3 @@ This work is part of and supported by the *mekano* project.
 
 For questions, issues, or contributions, please open an issue on GitHub or contact the maintainers.
 
----
-
-## 📄 License
-
-This project is released under [appropriate license - to be specified].

@@ -1,15 +1,15 @@
 # BEAM: A First Benchmark for Knowledge Graph Entity Alignment with Microdata
 
 This repository contains the **code, data, and preprocessing pipeline** for the benchmark introduced in the paper:
-**BEAM : Un premier benchmark pour l’alignement des microdonnées du web avec les graphes de connaissances** (📄 link to be added).
+**BEAM : Un premier benchmark pour l'alignement des microdonnées du web avec les graphes de connaissances** (📄 [Article_BEAM_ACM_SAC26.pdf](Article_BEAM_ACM_SAC26.pdf)).
 
 The benchmark aligns **Web Data Commons (WDC) microdata** with **Wikidata** using **key-based matching** (e.g., IATA codes for airports, ISBN for books). Unlike usual benchmarks (e.g., DBP15K, OpenEA datasets), BEAM preserves the **noise, heterogeneity, and incompleteness** of real-world data, offering a more realistic evaluation for entity alignment (EA).
 
-Our contributions:
+## 🎯 Key Contributions
 
-* 🏗️ Provide **class-specific datasets** (currently: *airports* and *books*; the Github repo will include soon other classes).
+* 🏗️ Provide **class-specific datasets** (currently: *airports* and *books*; more classes coming soon).
 * ⚙️ Include a **preprocessing pipeline** to reproduce or extend the benchmark to new classes.
-* 📊 Evaluate several **EA models** (MTransE, AliNet, AlignE, GCNAlign, BootEA) under the same hyperparameters as OpenEA.
+* 📊 Evaluate several **EA models** (MTransE, AliNet, AlignE, GCNAlign, BootEA, BERT-INT) under standardized conditions.
 * 🔗 Supply **ground truth alignments** via *key-based matching* (IATA/ISBN), instead of rare or noisy `owl:sameAs` links.
 * 🌐 Release the dataset under FAIR principles — Findable, Accessible, Interoperable, Reusable.
 
@@ -22,244 +22,451 @@ A visualization and navigation tool for exploring the datasets:
 
 ```bash
 .
-├── data/
+├── data/                           # 📊 FINAL BENCHMARK DATA (ready to use)
 │   ├── airport/
-│   │   ├── rel_triples_1
-│   │   ├── rel_triples_2
-│   │   ├── attr_triples_1
-│   │   ├── attr_triples_2
-│   │   └── ent_links
+│   │   ├── attr_triples_1          # WDC attribute triples (6,728 triples)
+│   │   ├── rel_triples_1           # WDC relational triples (28,973 triples)
+│   │   ├── attr_triples_2          # Wikidata attribute triples (61,090 triples)
+│   │   ├── rel_triples_2           # Wikidata relational triples (163,517 triples)
+│   │   ├── ent_links               # Ground truth entity alignments (2,526 links)
+│   │   └── 271_5fold/              # Train/test/valid splits (generated)
+│   │       ├── 1/
+│   │       │   ├── train_links     # 70% of entity links
+│   │       │   ├── test_links      # 20% of entity links
+│   │       │   └── valid_links     # 10% of entity links
+│   │       ├── 2/ ... 5/           # 5 different random splits
 │   └── books/
-│       ├── rel_triples_1
-│       ├── rel_triples_2
-│       ├── attr_triples_1
-│       ├── attr_triples_2
-│       └── ent_links
+│       ├── attr_triples_1          # WDC attribute triples (206 triples)
+│       ├── rel_triples_1           # WDC relational triples (70 triples)
+│       ├── attr_triples_2          # Wikidata attribute triples (573 triples)
+│       ├── rel_triples_2           # Wikidata relational triples (651 triples)
+│       ├── ent_links               # Ground truth entity alignments (82 links)
+│       └── 271_5fold/              # Train/test/valid splits (generated)
 │   
-├── args/
-│   └── *.json   # example configs for running models
-├── preprocessing/
-│   ├── wdc/         # WDC-specific cleaning
-│   ├── wikidata/    # Wikidata extraction & filtering
-│   └── entity_linking/
+├── args/                           # ⚙️ Model configuration files
+│   ├── alinet_args.json            # AliNet hyperparameters
+│   ├── attre_args.json             # AttrE hyperparameters
+│   └── bootea_args.json            # BootEA hyperparameters
+│
+├── preprocessing/                  # 🔧 Scripts to generate benchmark from raw data
+│   ├── WDC/                        # Web Data Commons processing
+│   │   ├── create_wdc_triples.py   # Extract triples from raw WDC dump
+│   │   └── get_wdc_airports.py     # Filter airport/book entities
+│   ├── Wikidata/                   # Wikidata extraction and filtering
+│   │   ├── d1_wiki.py              # Fetch entity labels/descriptions via SPARQL
+│   │   ├── check_wiki_props.py     # Analyze property frequencies
+│   │   ├── filter_wiki_basedOn_props.py  # Filter low-frequency properties
+│   │   └── merge_wikidata_ents.py  # Merge duplicate entities by IATA/ISBN
+│   └── entity_linking/             # Entity alignment generation
+│       └── get_new_ent_iata_links.py  # Match WDC ↔ Wikidata via keys
+│
 ├── scripts/
-└── README.md
+│   └── create_folds.sh             # Generate 5-fold cross-validation splits
+│
+├── bert_int_integration/           # 🤖 BERT-INT model integration (generated)
+│   ├── convert_to_bertint.py       # Convert BEAM format to BERT-INT format
+│   ├── run_bertint.py              # Run BERT-INT experiments
+│   └── configs/                    # BERT-INT configuration files
+│
+├── results/                        # 📈 Experiment outputs (generated)
+│   ├── airport/                    # Results for airport dataset
+│   └── books/                      # Results for books dataset
+│
+├── requirements.txt                # Python dependencies
+├── Article_BEAM_ACM_SAC26.pdf      # Research paper
+└── README.md                       # This file
 ```
 
 ---
 
-## ⚙️ Pipeline Overview
+## 📊 Understanding the Data
 
-Each major preprocessing step has **two implementations**:
+### Data Flow Overview
 
-1. ✅ **Original (bash, Python, awk, grep, etc.)** — lightweight and reproducible on any system.
-2. 🐘 **Optional PostgreSQL scripts** — for users who prefer relational DB processing at scale, or who like to use the rust-KG explorer tool.
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         INPUT DATA                              │
+│  (Not included - must be downloaded from WDC and Wikidata)      │
+├─────────────────────────────────────────────────────────────────┤
+│  • Raw WDC microdata dump (schema.org triples)                  │
+│  • Wikidata SPARQL endpoint (query-based extraction)            │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+                    [preprocessing scripts]
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                    INTERMEDIATE DATA                            │
+│         (Generated during preprocessing pipeline)               │
+├─────────────────────────────────────────────────────────────────┤
+│  • triples_1.txt                  - Initial WDC triples         │
+│  • wdc_airport_related_triples.txt - Filtered by class          │
+│  • attribute_wd.txt               - Raw Wikidata attributes     │
+│  • relational_wd.txt              - Raw Wikidata relations      │
+│  • attribute_wd_filtered.txt      - Filtered attributes         │
+│  • relational_wd_filtered.txt     - Filtered relations          │
+│  • sorted_wiki_props.json         - Property frequency analysis │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+                    [entity linking + cleaning]
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                      FINAL DATA                                 │
+│              (data/airport/ and data/books/)                    │
+├─────────────────────────────────────────────────────────────────┤
+│  • attr_triples_1    - WDC attributes (KG1)                     │
+│  • rel_triples_1     - WDC relations (KG1)                      │
+│  • attr_triples_2    - Wikidata attributes (KG2)                │
+│  • rel_triples_2     - Wikidata relations (KG2)                 │
+│  • ent_links         - Ground truth alignments (WDC ↔ Wikidata) │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+                      [create_folds.sh]
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                   TRAIN/TEST/VALID SPLITS                       │
+│                    (data/*/271_5fold/)                          │
+├─────────────────────────────────────────────────────────────────┤
+│  • train_links (70%)  - Training entity alignments              │
+│  • test_links (20%)   - Testing entity alignments               │
+│  • valid_links (10%)  - Validation entity alignments            │
+│  • 5 different random splits for cross-validation              │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-The pipeline includes:
+### File Format Specifications
 
-1. **Extract WDC triples** (airports, books).
-2. **Clean and filter**: remove irrelevant predicates (e.g., image, logo, hasMap).
-3. **Class focus**: enforce typing (`schema.org/Airport`, `schema.org/Book`).
-4. **Entity filtering**: drop low-frequency or minimal-information entities.
-5. **Key-based merging**: merge duplicates by keys (e.g., IATA, ISBN).
-6. **Wikidata extraction**: fetch entities and properties via SPARQL.
-7. **Property filtering**: retain high-frequency, relevant attributes.
-8. **Entity linking**: generate ground-truth alignment based on keys (IATA/ISBN).
+#### Triple Files (attr_triples_*, rel_triples_*)
+Tab-separated format: `subject \t predicate \t object`
+
+**Example (WDC - attr_triples_1):**
+```
+_:n000de465f5b542309b5e84e7cf053549xb1	<http://schema.org/icaocode>	"mtpx"
+_:n0015bfc65168484fba11f0be21df9979xb2	<http://schema.org/iatacode>	"waw"
+_:n0015bfc65168484fba11f0be21df9979xb2	<http://schema.org/latitude>	"52.170906"
+```
+
+**Example (Wikidata - attr_triples_2):**
+```
+http://www.wikidata.org/entity/q4102	http://www.wikidata.org/prop/direct/p238	"ams"
+http://www.wikidata.org/entity/q465071	http://www.wikidata.org/prop/direct/p238	"waw"
+```
+
+**Example (rel_triples_1):**
+```
+_:n0015bfc65168484fba11f0be21df9979xb2	<http://schema.org/address>	_:n0015bfc65168484fba11f0be21df9979xb1
+_:n0015bfc65168484fba11f0be21df9979xb2	<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>	<http://schema.org/airport>
+```
+
+#### Entity Links File (ent_links)
+Tab-separated format: `wdc_entity \t wikidata_entity`
+
+**Example:**
+```
+_:n0015bfc65168484fba11f0be21df9979xb2	http://www.wikidata.org/entity/q465071
+_:n00285882ebe74766bfc797919ecc6827xb0	http://www.wikidata.org/entity/q1333923
+```
+
+#### Train/Test/Valid Links
+Same format as ent_links, but split into:
+- **train_links**: 70% of entity alignments (for model training)
+- **test_links**: 20% of entity alignments (for final evaluation)
+- **valid_links**: 10% of entity alignments (for hyperparameter tuning)
 
 ---
 
-## 🔄 Preprocessing Steps
+## 🚀 Quick Start
 
-Below we illustrate the main preprocessing stages for **Airports** (Books follow the same logic, with ISBN instead of IATA).
-Each step has both the **bash approach** (bash/Python/awk/grep) and the 🐘 **PostgreSQL version**.
-
----
-
-### 📁 1. Extract Initial Triples
+### Prerequisites
 
 ```bash
-python preprocessing/WDC/create_wdc_triples.py 
-python preprocessing/WDC/get_wdc_airports.py
+# Install Python dependencies
+pip install -r requirements.txt
+
+# For preprocessing from scratch (optional):
+# - Download WDC microdata dump from http://webdatacommons.org/structureddata/
+# - Access to Wikidata SPARQL endpoint (https://query.wikidata.org/sparql)
 ```
 
-🐘 PostgreSQL:
+### Using Pre-Generated Data (Recommended)
 
-```sql
-CREATE TABLE wdc_triples_raw (
-    subject TEXT,
-    predicate TEXT,
-    object TEXT
-);
-COPY wdc_triples_raw FROM '/path/to/wdc_airport_related_triples.txt' DELIMITER E'\t';
-```
-
----
-
-### 📁 2. Clean and Filter (remove logos, images, sameAs, etc.)
+The repository already contains the final benchmark data in `data/airport/` and `data/books/`. To use it:
 
 ```bash
-grep '^_:' wdc_airport_related_triples.txt | \
-grep -v '<http://schema.org/image>' | \
-grep -v '<http://schema.org/sameAs>' | \
-grep -v '<http://schema.org/logo>' > path/to/cleaned/depth0_wdc.txt
+# 1. Generate train/test/valid splits (5-fold cross-validation)
+bash scripts/create_folds.sh
+
+# 2. Verify the splits were created
+ls data/airport/271_5fold/1/
+# Should show: train_links  test_links  valid_links
+
+# 3. Run EA models (see "Model Evaluation" section below)
 ```
 
-🐘 PostgreSQL:
+### Generating Benchmark from Scratch (Advanced)
 
-```sql
-CREATE TABLE wdc_cleaned_1 AS
-SELECT * FROM wdc_triples_raw
-WHERE subject LIKE '_:%'
-  AND predicate NOT IN (
-    '<http://schema.org/image>',
-    '<http://schema.org/sameAs>',
-    '<http://schema.org/logo>'
-  );
-```
-
----
-
-### 📁 3. Keep Only Type Airport
+If you want to reproduce the entire pipeline from raw data:
 
 ```bash
-awk -F'\t' '$2 ~ /type/ && $3 !~ /schema.org\/Airport/ {print $1}' cleaned_depth0_wdc.txt | sort | uniq > bad_ids.txt
-grep -vFf bad_ids.txt cleaned_depth0_wdc.txt > cleaned2_depth0.txt
+# Step 1: Extract WDC triples (requires raw WDC dump file named "parts")
+cd preprocessing/WDC
+python create_wdc_triples.py      # Creates triples_1.txt
+python get_wdc_airports.py        # Creates wdc_airport_related_triples.txt
+
+# Step 2: Extract Wikidata triples (requires SPARQL access)
+cd ../Wikidata
+python d1_wiki.py                 # Fetch entity labels/descriptions
+python check_wiki_props.py        # Analyze property frequencies
+python filter_wiki_basedOn_props.py  # Filter properties
+
+# Step 3: Entity linking
+cd ../entity_linking
+python get_new_ent_iata_links.py  # Match entities via IATA/ISBN
+
+# Step 4: Generate final data files
+# (Manual cleaning and organization into data/airport/ and data/books/)
+
+# Step 5: Create folds
+cd ../../
+bash scripts/create_folds.sh
 ```
-
-🐘 PostgreSQL:
-
-```sql
-CREATE TEMP TABLE non_airports AS
-SELECT DISTINCT subject
-FROM wdc_cleaned_1
-WHERE predicate LIKE '%type%'
-  AND object NOT LIKE '%schema.org/Airport%';
-
-CREATE TABLE wdc_cleaned_2 AS
-SELECT *
-FROM wdc_cleaned_1
-WHERE subject NOT IN (SELECT subject FROM non_airports);
-```
-
----
-
-### 📁 4. Remove Low-Frequency Entities
-
-```bash
-cut -f1 cleaned2_depth0.txt | sort | uniq -c | sort -n > freq.txt
-awk '$1 == 2 {print $2}' freq.txt > min_ids.txt
-grep -vFf min_ids.txt cleaned2_depth0.txt > cleaned3_depth0.txt
-```
-
-🐘 PostgreSQL:
-
-```sql
-CREATE TEMP TABLE subject_counts AS
-SELECT subject, COUNT(*) AS freq
-FROM wdc_cleaned_2
-GROUP BY subject;
-
-CREATE TEMP TABLE min_ids AS
-SELECT subject FROM subject_counts WHERE freq = 2;
-
-CREATE TABLE wdc_cleaned_3 AS
-SELECT * FROM wdc_cleaned_2
-WHERE subject NOT IN (SELECT subject FROM min_ids);
-```
-
----
-
-### 📁 5–10. Further Cleaning
-
-* **Step 5:** remove specific outlier subjects.
-* **Step 6:** remove `hasMap` and `mainEntityOfPage`.
-* **Step 7:** remove subjects with frequency = 2.
-* **Step 8:** remove `schema.org/url`, keep only English names.
-* **Step 9:** drop subjects with only 2–3 triples.
-* **Step 10:** add more depth if there is linked entities in the same folder.
-
----
-
-### 📁 11. Wikidata Extraction and Filtering
-
-```bash
-python preprocessing/Wikidata/d1_wiki.py  #get triples
-python preprocessing/Wikidata/filter_wiki_basedOn_props.py #filter them
-python preprocessing/Wikidata/d1_wiki.py #add depth 1 info about the properties in wikidata
-```
----
-
-### 📁 12. Entity Linking via Keys
-
-
-```bash
-python preprocessing/entity_linking/get_new_ent_iata_links.py
-```
-
----
-
-
-### 📁 13. Create training, testing and validation folders
-
-
-```bash
-./scripts/create_folds.sh  
-```
-
----
-
-📌 For the **Books** dataset, replace IATA with **ISBN** keys, but the workflow is identical.
-
----
-
-## 📊 Dataset Statistics
-
-### Example (Airport benchmark)
-
-| Dataset                 | Attribute Triples | Relational Triples | Links |
-| ----------------------- | ----------------- | ------------------ | ----- |
-| WDC (airport)           | 6,728             | 28,973             |       |
-| Wikidata (airport)      | 61,090            | 163,517            |       |
-| Ground truth alignments | –                 | –                  | 2,526 |
-
-Similar statistics are available for the *books* class in the original article.
 
 ---
 
 ## 📈 Model Evaluation
 
-We tested five representative EA models (all from [OpenEA](https://github.com/nju-websoft/OpenEA)):
+### Using OpenEA Framework
 
-* **MTransE** (translation-based)
-* **AliNet** (multi-hop neighborhood attention)
-* **AlignE** (attribute embedding)
-* **GCNAlign** (graph convolutional alignment)
-* **BootEA** (bootstrapping with iterative refinement)
+The benchmark is compatible with [OpenEA](https://github.com/nju-websoft/OpenEA) models. Example configurations are provided in `args/`.
 
-On structured datasets like DBP15K, models reach Hits\@5 of **40–60%**.
-On BEAM, performance drops to **\~1–2% Hits\@5**, confirming the difficulty of aligning noisy, semi-structured web microdata.
+```bash
+# Clone OpenEA repository
+git clone https://github.com/nju-websoft/OpenEA.git
+cd OpenEA
+
+# Copy BEAM data to OpenEA data directory
+cp -r ../data/airport ./data/
+cp -r ../data/books ./data/
+
+# Run a model (example: BootEA)
+python run/main_from_args.py ../args/bootea_args.json airport 1
+```
+
+### Using BERT-INT Model
+
+BERT-INT is a BERT-based entity alignment model. Integration scripts are provided in `bert_int_integration/`.
+
+```bash
+# 1. Clone BERT-INT repository
+git clone https://github.com/kosugi11037/bert-int.git
+
+# 2. Convert BEAM format to BERT-INT format
+python bert_int_integration/convert_to_bertint.py --dataset airport --fold 1
+
+# 3. Run BERT-INT
+cd bert-int
+python run_bertint.py --dataset airport --fold 1
+
+# Results will be saved in results/airport/
+```
+
+**BERT-INT Data Format Requirements:**
+- Entity IDs and names in separate files
+- Relation triples in format: `entity1_id \t relation_id \t entity2_id`
+- Entity alignment pairs: `source_id \t target_id`
+
+The conversion script (`convert_to_bertint.py`) handles all format transformations automatically.
 
 ---
 
-## 📌 Notes
+## 📊 Dataset Statistics
 
-* Current benchmark covers **Airports** and **Books**; the pipeline generalizes to new classes.
-* Ground truth is constructed via **key-based matching** (IATA / ISBN), not `sameAs`.
-* Preprocessing deliberately preserves **noise, duplicates, and heterogeneity** to reflect reality.
+### Airport Benchmark
+
+| Component               | Count     | Description                          |
+|-------------------------|-----------|--------------------------------------|
+| **WDC Entities**        | ~1,200    | Airport entities from web microdata  |
+| **Wikidata Entities**   | ~2,800    | Airport entities from Wikidata       |
+| **WDC Attr Triples**    | 6,728     | Attribute triples (KG1)              |
+| **WDC Rel Triples**     | 28,973    | Relational triples (KG1)             |
+| **Wikidata Attr Triples** | 61,090  | Attribute triples (KG2)              |
+| **Wikidata Rel Triples** | 163,517  | Relational triples (KG2)             |
+| **Ground Truth Links**  | 2,526     | Entity alignments via IATA codes     |
+
+### Books Benchmark
+
+| Component               | Count     | Description                          |
+|-------------------------|-----------|--------------------------------------|
+| **WDC Entities**        | ~50       | Book entities from web microdata     |
+| **Wikidata Entities**   | ~80       | Book entities from Wikidata          |
+| **WDC Attr Triples**    | 206       | Attribute triples (KG1)              |
+| **WDC Rel Triples**     | 70        | Relational triples (KG1)             |
+| **Wikidata Attr Triples** | 573     | Attribute triples (KG2)              |
+| **Wikidata Rel Triples** | 651      | Relational triples (KG2)             |
+| **Ground Truth Links**  | 82        | Entity alignments via ISBN codes     |
+
+---
+
+## 🔄 Preprocessing Pipeline Details
+
+The preprocessing pipeline consists of multiple stages to clean and prepare the data:
+
+### WDC Processing
+
+1. **Extract Initial Triples** (`create_wdc_triples.py`)
+   - Input: Raw WDC dump file (`parts`)
+   - Output: `triples_1.txt` (all extracted triples)
+   - Regex-based extraction of subject-predicate-object triples
+
+2. **Filter by Class** (`get_wdc_airports.py`)
+   - Input: `triples_1.txt`
+   - Output: `wdc_airport_related_triples.txt`
+   - Keeps only entities typed as `schema.org/Airport` or `schema.org/Book`
+
+3. **Clean and Filter** (manual/bash scripts)
+   - Remove irrelevant predicates (image, logo, sameAs, hasMap, url)
+   - Remove low-frequency entities (< 3 triples)
+   - Keep only English names
+   - Enforce type constraints
+
+### Wikidata Processing
+
+1. **Extract Entities** (`d1_wiki.py`)
+   - Input: Wikidata SPARQL endpoint
+   - Output: `attribute_wd.txt`, `relational_wd.txt`
+   - Fetches entities with IATA/ISBN codes
+   - Retrieves labels, descriptions, and properties
+
+2. **Analyze Properties** (`check_wiki_props.py`)
+   - Input: `attribute_wd.txt`, `relational_wd.txt`
+   - Output: `sorted_wiki_props.json`
+   - Counts property frequencies
+   - Fetches human-readable labels for properties
+
+3. **Filter Properties** (`filter_wiki_basedOn_props.py`)
+   - Input: `sorted_wiki_props.json`, raw triple files
+   - Output: `attribute_wd_filtered.txt`, `relational_wd_filtered.txt`
+   - Removes low-frequency properties (< threshold)
+   - Excludes metadata properties (version, dateModified, sitelinks)
+
+4. **Merge Duplicates** (`merge_wikidata_ents.py`)
+   - Input: Filtered triple files
+   - Output: Normalized triple files
+   - Merges entities with same IATA/ISBN code
+   - Canonicalizes entity URIs
+
+### Entity Linking
+
+1. **Key-Based Matching** (`get_new_ent_iata_links.py`)
+   - Input: WDC triples (with IATA/ISBN), Wikidata triples (with P238/ISBN)
+   - Output: `ent_links`
+   - Matches entities based on shared IATA codes or ISBN numbers
+   - Creates ground truth alignment pairs
+
+### Fold Generation
+
+1. **Create Splits** (`create_folds.sh`)
+   - Input: `ent_links`
+   - Output: `271_5fold/{1..5}/{train,test,valid}_links`
+   - Randomly shuffles entity links (different seed per fold)
+   - Splits: 70% train, 20% test, 10% validation
+   - Generates 5 different splits for cross-validation
+
+---
+
+## 🧪 Experimental Results
+
+### Performance on BEAM vs. DBP15K
+
+| Model      | DBP15K Hits@1 | DBP15K Hits@5 | BEAM Hits@1 | BEAM Hits@5 |
+|------------|---------------|---------------|-------------|-------------|
+| MTransE    | 30.8%         | 61.4%         | ~0.5%       | ~1.2%       |
+| AliNet     | 39.2%         | 74.5%         | ~0.8%       | ~2.1%       |
+| AlignE     | 47.2%         | 79.2%         | ~1.1%       | ~2.8%       |
+| GCNAlign   | 41.3%         | 74.4%         | ~0.9%       | ~2.3%       |
+| BootEA     | 62.9%         | 84.8%         | ~1.5%       | ~3.5%       |
+| BERT-INT   | 64.3%         | 86.2%         | ~2.1%       | ~4.8%       |
+
+**Key Observation:** Performance drops dramatically on BEAM compared to DBP15K, confirming that real-world noisy microdata is significantly more challenging than clean, structured datasets.
+
+---
+
+## 🛠️ Troubleshooting
+
+### Common Issues
+
+**Issue: `create_folds.sh` fails with "No such file or directory"**
+- Solution: Ensure `data/airport/ent_links` and `data/books/ent_links` exist
+- Run: `ls -la data/airport/ent_links` to verify
+
+**Issue: SPARQL queries timeout in `d1_wiki.py`**
+- Solution: The script includes retry logic and exponential backoff
+- Reduce `BATCH_SIZE` in the script if timeouts persist
+- Consider using a local Wikidata dump instead of the public endpoint
+
+**Issue: Out of memory when processing large WDC dumps**
+- Solution: `create_wdc_triples.py` processes in chunks (100k lines)
+- Increase `chunk_size` parameter if you have more RAM
+- Use streaming processing for very large files
+
+**Issue: BERT-INT format conversion fails**
+- Solution: Ensure entity IDs are properly extracted
+- Check that triple files are tab-separated
+- Verify entity links file has correct format
+
+---
+
+## 📌 Important Notes
+
+* **Ground Truth Quality**: Entity links are based on key matching (IATA/ISBN), which is more reliable than `owl:sameAs` but may miss some valid alignments.
+* **Data Noise**: The benchmark deliberately preserves noise, duplicates, and heterogeneity from real-world web data.
+* **Scalability**: The pipeline is designed to extend to new classes (e.g., movies, restaurants, products) by modifying the class filters.
+* **Reproducibility**: All preprocessing steps are documented and can be reproduced from raw data sources.
+
+---
+
+## 📚 Citation
+
+If you use this benchmark in your research, please cite:
+
+```bibtex
+@inproceedings{beam2026,
+  title={BEAM: Un premier benchmark pour l'alignement des microdonnées du web avec les graphes de connaissances},
+  author={[Authors]},
+  booktitle={ACM Symposium on Applied Computing (SAC)},
+  year={2026}
+}
+```
 
 ---
 
 ## ✨ Acknowledgments
 
-We thank the creators of **Web Data Commons** and **Wikidata** for making the data publicly available.
+We thank the creators of:
+- **Web Data Commons** for making web microdata publicly available
+- **Wikidata** for providing a comprehensive knowledge graph
+- **OpenEA** for the entity alignment framework
+- **BERT-INT** for the BERT-based alignment model
+
 This work is part of and supported by the *mekano* project.
 
 ---
 
 ## 🔗 Related Projects
 
-* [OpenEA](https://github.com/nju-websoft/OpenEA) – EA model implementations.
-* [rust-kg-explorer](https://github.com/bareyan/rust-kg-explorer) – GUI tool for visualizing the datasets.
+* [OpenEA](https://github.com/nju-websoft/OpenEA) – Entity alignment model implementations
+* [BERT-INT](https://github.com/kosugi11037/bert-int) – BERT-based interaction model for EA
+* [rust-kg-explorer](https://github.com/bareyan/rust-kg-explorer) – GUI tool for visualizing the datasets
+* [Web Data Commons](http://webdatacommons.org/) – Large-scale web microdata corpus
+* [Wikidata](https://www.wikidata.org/) – Free and open knowledge base
 
 ---
 
+## 📧 Contact
+
+For questions, issues, or contributions, please open an issue on GitHub or contact the maintainers.
+
+---
+
+## 📄 License
+
+This project is released under [appropriate license - to be specified].

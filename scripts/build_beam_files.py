@@ -145,6 +145,7 @@ def split_triples(
     lowercase_wd=False,
     mask_values=None,
     exclude_props=None,
+    exclude_prop_patterns=None,
     replace_map=None,
     progress_every=0,
 ):
@@ -184,6 +185,8 @@ def split_triples(
                         continue
                     if exclude_props and p in exclude_props:
                         continue
+                    if exclude_prop_patterns and any(pat in p.lower() for pat in exclude_prop_patterns):
+                        continue
                     if replace_map and s in replace_map:
                         s = replace_map[s]
                     if replace_map and (not o.startswith('"')) and o in replace_map:
@@ -217,7 +220,7 @@ def batch_iter(items: List[str], size: int) -> Iterable[List[str]]:
         yield items[i:i + size]
 
 
-def count_wdc_triples(input_path, subjects, exclude_props=None, mask_values=None):
+def count_wdc_triples(input_path, subjects, exclude_props=None, exclude_prop_patterns=None, mask_values=None):
     counts = {s: 0 for s in subjects}
     with open(input_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -228,6 +231,8 @@ def count_wdc_triples(input_path, subjects, exclude_props=None, mask_values=None
             if s not in counts:
                 continue
             if exclude_props and p in exclude_props:
+                continue
+            if exclude_prop_patterns and any(pat in p.lower() for pat in exclude_prop_patterns):
                 continue
             if mask_values and o.startswith('"'):
                 lex = literal_lex(o)
@@ -308,7 +313,7 @@ def filter_triples_by_prop_count(
 
 
 def wikidata_prop_uris(prop_id):
-    prop_id = prop_id.upper()
+    prop_id = prop_id.lower()
     return {
         f"http://www.wikidata.org/prop/direct/{prop_id}",
         f"http://www.wikidata.org/prop/direct-normalized/{prop_id}",
@@ -332,13 +337,20 @@ def schema_org_prop_uris(prop_name):
     }
 
 
+def normalize_wd_prop_id(value):
+    match = re.search(r'P\d+', value, re.IGNORECASE)
+    if not match:
+        return None
+    return match.group(0).lower()
+
+
 def prop_uri_to_entity(uri):
     if "wikidata.org/prop/" not in uri:
         return None
     tail = uri.rstrip("/").split("/")[-1]
-    if not tail.startswith("P"):
+    if not (tail.startswith("P") or tail.startswith("p")):
         return None
-    return f"http://www.wikidata.org/entity/{tail}"
+    return f"http://www.wikidata.org/entity/{tail.lower()}"
 
 
 def collect_wikidata_uris(attr_path, rel_path):
@@ -449,6 +461,7 @@ def run_pipeline(
     wdc_mask_values,
     wd_mask_values,
     wdc_exclude_props,
+    wdc_exclude_prop_patterns,
     wd_exclude_props,
     replace_map,
     lowercase_wd,
@@ -471,6 +484,7 @@ def run_pipeline(
         max_depth=args.max_depth,
         mask_values=wdc_mask_values,
         exclude_props=wdc_exclude_props,
+        exclude_prop_patterns=wdc_exclude_prop_patterns,
         progress_every=args.progress_every,
     )
 
@@ -559,19 +573,6 @@ def run_pipeline(
                 args.backoff,
                 lowercase_wd,
             )
-    with open(in_rel, "r", encoding="utf-8") as fin, \
-         open(out_rel, "w", encoding="utf-8") as fout:
-        for line in fin:
-            parts = line.rstrip("\n").split("\t")
-            if len(parts) != 3:
-                continue
-            p = parts[1]
-            if exclude_props and p in exclude_props:
-                continue
-            if counts.get(p, 0) >= min_count:
-                fout.write(line)
-
-
 def sparql_construct(
     endpoint,
     subjects,
@@ -727,7 +728,7 @@ def main():
     parser.add_argument("--wdc-exclude-prop", action="append", default=[], help="Exclude WDC predicate URI (repeatable).")
     parser.add_argument("--wd-exclude-prop", action="append", default=[], help="Exclude Wikidata predicate URI (repeatable).")
     parser.add_argument("--wd-link-prop-id", action="append", default=[], help="Wikidata property id to drop (e.g., P1243).")
-    parser.add_argument("--wdc-link-prop-name", action="append", default=[], help="schema.org property name to drop (e.g., isrcCode).")
+    parser.add_argument("--wdc-link-prop-name", action="append", default=[], help="Pattern to drop WDC predicates (e.g., isrc).")
     parser.add_argument("--split-link-values", action="store_true", help="Create subfolders with and without link values.")
     parser.add_argument("--no-wd-labels", action="store_true", help="Do not add labels/descriptions for Wikidata entities/properties.")
     parser.add_argument("--wd-prop-min-count", type=int, default=0, help="Min property frequency for Wikidata.")
@@ -769,18 +770,17 @@ def main():
     wd_exclude_props = set(p for p in args.wd_exclude_prop if p)
     wd_link_prop_uris = set()
     for prop_id in args.wd_link_prop_id:
-        if prop_id:
-            wd_link_prop_uris.update(wikidata_prop_uris(prop_id))
-    wdc_link_prop_uris = set()
-    for prop_name in args.wdc_link_prop_name:
-        if prop_name:
-            wdc_link_prop_uris.update(schema_org_prop_uris(prop_name))
+        norm = normalize_wd_prop_id(prop_id) if prop_id else None
+        if norm:
+            wd_link_prop_uris.update(wikidata_prop_uris(norm))
+    wdc_link_prop_patterns = {p.lower() for p in args.wdc_link_prop_name if p}
 
     if args.wdc_min_triples > 0:
         counts = count_wdc_triples(
             args.wdc_nq,
             set(wdc_entities),
             exclude_props=wdc_exclude_props,
+            exclude_prop_patterns=wdc_link_prop_patterns,
             mask_values=wdc_mask_values,
         )
         allowed_wdc = {s for s, c in counts.items() if c >= args.wdc_min_triples}
@@ -810,7 +810,8 @@ def main():
             out_without,
             wdc_mask_values,
             wd_mask_values,
-            wdc_exclude_props | wdc_link_prop_uris,
+            wdc_exclude_props,
+            wdc_link_prop_patterns,
             wd_exclude_props | wd_link_prop_uris,
             replace_map,
             lowercase_wd,
@@ -826,6 +827,7 @@ def main():
             None,
             None,
             wdc_exclude_props,
+            set(),
             wd_exclude_props,
             replace_map,
             lowercase_wd,
@@ -841,7 +843,8 @@ def main():
             args.out_dir,
             wdc_mask_values,
             wd_mask_values,
-            wdc_exclude_props | wdc_link_prop_uris,
+            wdc_exclude_props,
+            wdc_link_prop_patterns,
             wd_exclude_props | wd_link_prop_uris,
             replace_map,
             lowercase_wd,

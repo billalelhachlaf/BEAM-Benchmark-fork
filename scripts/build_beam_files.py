@@ -110,6 +110,9 @@ def write_links(path, wdc_entities, wd_entities, dedupe):
             out.write(f"{wdc}\t{wd}\n")
 
 
+LITERAL_RE = re.compile(r'^"((?:[^"\\]|\\.)*)"(?:(?:\^\^<[^>]+>)|@[a-zA-Z-]+)?$')
+
+
 def literal_lex(value):
     if not value.startswith('"'):
         return None
@@ -132,7 +135,10 @@ def clean_literal(value):
         return value
     lex = literal_lex(value)
     if lex is None:
-        return value
+        match = LITERAL_RE.match(value)
+        if not match:
+            return value
+        lex = match.group(1)
     return f"\"{lex}\""
 
 
@@ -148,6 +154,7 @@ def split_triples(
     exclude_prop_patterns=None,
     replace_map=None,
     progress_every=0,
+    follow_iri_objects=False,
 ):
     os.makedirs(os.path.dirname(out_attr_path), exist_ok=True)
     os.makedirs(os.path.dirname(out_rel_path), exist_ok=True)
@@ -204,6 +211,8 @@ def split_triples(
                         rel_out.write(f"{s_out}\t{p_out}\t{o_out}\n")
                         kept_rel += 1
                         if o.startswith("_:"):
+                            new_subjects.add(o)
+                        elif follow_iri_objects and o.startswith("<"):
                             new_subjects.add(o)
             processed_subjects.update(targets)
             keep_subjects.update(new_subjects)
@@ -350,11 +359,19 @@ def prop_uri_to_entity(uri):
     tail = uri.rstrip("/").split("/")[-1]
     if not (tail.startswith("P") or tail.startswith("p")):
         return None
-    return f"http://www.wikidata.org/entity/{tail.lower()}"
+    return f"http://www.wikidata.org/entity/{tail.upper()}"
+
+
+def canonical_wd_entity_uri(uri):
+    match = re.match(r"^http://www\\.wikidata\\.org/entity/([pqPQ]\\d+)$", uri)
+    if not match:
+        return uri
+    return f"http://www.wikidata.org/entity/{match.group(1).upper()}"
 
 
 def collect_wikidata_uris(attr_path, rel_path):
     uris = set()
+    prop_uri_map = {}
     for path in (attr_path, rel_path):
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
@@ -363,14 +380,30 @@ def collect_wikidata_uris(attr_path, rel_path):
                     continue
                 s, p, o = parts
                 if s.startswith("http://www.wikidata.org/entity/"):
-                    uris.add(s)
+                    uris.add(canonical_wd_entity_uri(s))
+                elif s.startswith("http://www.wikidata.org/prop/"):
+                    ent = prop_uri_to_entity(s)
+                    if ent:
+                        ent = canonical_wd_entity_uri(ent)
+                        prop_uri_map[s] = ent
+                        uris.add(ent)
                 if p.startswith("http://www.wikidata.org/prop/"):
                     ent = prop_uri_to_entity(p)
                     if ent:
+                        ent = canonical_wd_entity_uri(ent)
+                        prop_uri_map[p] = ent
                         uris.add(ent)
+                elif p.startswith("http://www.wikidata.org/entity/"):
+                    uris.add(canonical_wd_entity_uri(p))
                 if o.startswith("http://www.wikidata.org/entity/"):
-                    uris.add(o)
-    return uris
+                    uris.add(canonical_wd_entity_uri(o))
+                elif o.startswith("http://www.wikidata.org/prop/"):
+                    ent = prop_uri_to_entity(o)
+                    if ent:
+                        ent = canonical_wd_entity_uri(ent)
+                        prop_uri_map[o] = ent
+                        uris.add(ent)
+    return uris, prop_uri_map
 
 
 def fetch_wd_labels_descriptions(uris, endpoint, language, batch_size, sleep_s, timeout, retries, backoff):
@@ -431,9 +464,12 @@ def append_labels_descriptions(
     backoff,
     lowercase_wd,
 ):
-    uris = collect_wikidata_uris(attr_path, rel_path)
-    if not uris:
+    uris, prop_uri_map = collect_wikidata_uris(attr_path, rel_path)
+    if not uris and not prop_uri_map:
         return
+    ent_to_prop = {}
+    for prop_uri, ent_uri in prop_uri_map.items():
+        ent_to_prop.setdefault(ent_uri, []).append(prop_uri)
     triples = fetch_wd_labels_descriptions(
         uris,
         endpoint,
@@ -449,6 +485,87 @@ def append_labels_descriptions(
             s_out, p_out, o_out = transform_triple(s, p, o, lowercase_wd)
             o_out = clean_literal(o_out)
             out.write(f"{s_out}\t{p_out}\t{o_out}\n")
+            for prop_uri in ent_to_prop.get(s, []):
+                s_prop, p_prop, o_prop = transform_triple(prop_uri, p, o, lowercase_wd)
+                o_prop = clean_literal(o_prop)
+                out.write(f"{s_prop}\t{p_prop}\t{o_prop}\n")
+
+
+def fetch_wd_label_desc_map(uris, endpoint, language, batch_size, sleep_s, timeout, retries, backoff):
+    triples = fetch_wd_labels_descriptions(
+        uris,
+        endpoint,
+        language,
+        batch_size,
+        sleep_s,
+        timeout,
+        retries,
+        backoff,
+    )
+    labels = {}
+    for s, p, o in triples:
+        entry = labels.setdefault(s, {"label": "", "desc": ""})
+        if p.endswith("#label"):
+            entry["label"] = literal_lex(o) or o.strip('"')
+        elif p.endswith("description"):
+            entry["desc"] = literal_lex(o) or o.strip('"')
+    return labels
+
+
+def write_prop_stats(
+    out_path,
+    attr_path,
+    rel_path,
+    endpoint,
+    language,
+    batch_size,
+    sleep_s,
+    timeout,
+    retries,
+    backoff,
+):
+    counts = count_props_in_files([attr_path, rel_path])
+    prop_entity_map = {}
+    for prop in counts.keys():
+        if prop.startswith("http://www.wikidata.org/prop/"):
+            ent = prop_uri_to_entity(prop)
+            if ent:
+                prop_entity_map[prop] = canonical_wd_entity_uri(ent)
+
+    label_map = {}
+    if prop_entity_map:
+        label_map = fetch_wd_label_desc_map(
+            set(prop_entity_map.values()),
+            endpoint,
+            language,
+            batch_size,
+            sleep_s,
+            timeout,
+            retries,
+            backoff,
+        )
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as out:
+        out.write("predicate\tcount\tlabel\tdescription\n")
+        for prop, count in sorted(counts.items(), key=lambda x: (-x[1], x[0])):
+            label = ""
+            desc = ""
+            ent = prop_entity_map.get(prop)
+            if ent and ent in label_map:
+                label = label_map[ent].get("label", "")
+                desc = label_map[ent].get("desc", "")
+            out.write(f"{prop}\t{count}\t{label}\t{desc}\n")
+
+
+def write_prop_stats_simple(out_path, attr_path, rel_path):
+    counts = count_props_in_files([attr_path, rel_path])
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as out:
+        out.write("predicate\tcount\tlabel\tdescription\n")
+        for prop, count in sorted(counts.items(), key=lambda x: (-x[1], x[0])):
+            label = prop.rstrip("/").split("/")[-1]
+            out.write(f"{prop}\t{count}\t{label}\t\n")
 
 
 def run_pipeline(
@@ -472,6 +589,8 @@ def run_pipeline(
     out_attr_2 = os.path.join(out_dir, "attr_triples_2")
     out_rel_2 = os.path.join(out_dir, "rel_triples_2")
     out_links = os.path.join(out_dir, "ent_links")
+    out_prop_stats_wdc = os.path.join(out_dir, "prop_stats_wdc.tsv")
+    out_prop_stats_wd = os.path.join(out_dir, "prop_stats_wd.tsv")
 
     wd_entities_out = [normalize_wd_uri(replace_map.get(uri, uri), lowercase_wd) for uri in wd_entities_raw]
     write_links(out_links, wdc_entities, wd_entities_out, args.dedupe_links)
@@ -486,6 +605,7 @@ def run_pipeline(
         exclude_props=wdc_exclude_props,
         exclude_prop_patterns=wdc_exclude_prop_patterns,
         progress_every=args.progress_every,
+        follow_iri_objects=True,
     )
 
     if args.wd_nq:
@@ -573,6 +693,19 @@ def run_pipeline(
                 args.backoff,
                 lowercase_wd,
             )
+    write_prop_stats_simple(out_prop_stats_wdc, out_attr_1, out_rel_1)
+    write_prop_stats(
+        out_prop_stats_wd,
+        out_attr_2,
+        out_rel_2,
+        args.sparql_url,
+        args.lang,
+        args.batch_size,
+        args.sleep,
+        args.timeout,
+        args.retries,
+        args.backoff,
+    )
 def sparql_construct(
     endpoint,
     subjects,
@@ -729,7 +862,6 @@ def main():
     parser.add_argument("--wd-exclude-prop", action="append", default=[], help="Exclude Wikidata predicate URI (repeatable).")
     parser.add_argument("--wd-link-prop-id", action="append", default=[], help="Wikidata property id to drop (e.g., P1243).")
     parser.add_argument("--wdc-link-prop-name", action="append", default=[], help="Pattern to drop WDC predicates (e.g., isrc).")
-    parser.add_argument("--split-link-values", action="store_true", help="Create subfolders with and without link values.")
     parser.add_argument("--no-wd-labels", action="store_true", help="Do not add labels/descriptions for Wikidata entities/properties.")
     parser.add_argument("--wd-prop-min-count", type=int, default=0, help="Min property frequency for Wikidata.")
     parser.add_argument("--merge-wd-by-link-values", action="store_true", help="Merge Wikidata entities sharing wiki_value.")
@@ -797,59 +929,41 @@ def main():
 
     add_wd_labels = not args.no_wd_labels
 
-    if args.split_link_values:
-        out_without = os.path.join(args.out_dir, "without_link_code")
-        out_with = os.path.join(args.out_dir, "with_link_code")
+    out_without = os.path.join(args.out_dir, "without_link_code")
+    out_with = os.path.join(args.out_dir, "with_link_code")
 
-        run_pipeline(
-            args,
-            wdc_entities,
-            wd_entities_raw,
-            wdc_values,
-            wd_values,
-            out_without,
-            wdc_mask_values,
-            wd_mask_values,
-            wdc_exclude_props,
-            wdc_link_prop_patterns,
-            wd_exclude_props | wd_link_prop_uris,
-            replace_map,
-            lowercase_wd,
-            add_wd_labels,
-        )
-        run_pipeline(
-            args,
-            wdc_entities,
-            wd_entities_raw,
-            wdc_values,
-            wd_values,
-            out_with,
-            None,
-            None,
-            wdc_exclude_props,
-            set(),
-            wd_exclude_props,
-            replace_map,
-            lowercase_wd,
-            add_wd_labels,
-        )
-    else:
-        run_pipeline(
-            args,
-            wdc_entities,
-            wd_entities_raw,
-            wdc_values,
-            wd_values,
-            args.out_dir,
-            wdc_mask_values,
-            wd_mask_values,
-            wdc_exclude_props,
-            wdc_link_prop_patterns,
-            wd_exclude_props | wd_link_prop_uris,
-            replace_map,
-            lowercase_wd,
-            add_wd_labels,
-        )
+    run_pipeline(
+        args,
+        wdc_entities,
+        wd_entities_raw,
+        wdc_values,
+        wd_values,
+        out_without,
+        wdc_mask_values,
+        wd_mask_values,
+        wdc_exclude_props,
+        wdc_link_prop_patterns,
+        wd_exclude_props | wd_link_prop_uris,
+        replace_map,
+        lowercase_wd,
+        add_wd_labels,
+    )
+    run_pipeline(
+        args,
+        wdc_entities,
+        wd_entities_raw,
+        wdc_values,
+        wd_values,
+        out_with,
+        None,
+        None,
+        wdc_exclude_props,
+        set(),
+        wd_exclude_props,
+        replace_map,
+        lowercase_wd,
+        add_wd_labels,
+    )
 
 
 if __name__ == "__main__":

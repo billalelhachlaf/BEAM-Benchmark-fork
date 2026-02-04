@@ -14,6 +14,7 @@ import re
 import gzip
 import shutil
 import requests
+import unicodedata
 from pathlib import Path
 from collections import defaultdict
 from SPARQLWrapper import SPARQLWrapper, JSON
@@ -40,12 +41,19 @@ def normalize_for_matching(text):
     """
     Normalisation agressive pour matching:
     - Lowercase
+    - Suppression accents/diacritiques
     - Suppression caractères spéciaux
     - Garde seulement alphanumériques
     """
     if not text:
         return ""
-    return re.sub(r'[^a-z0-9]', '', text.lower())
+    # 1) Lowercase
+    text = text.lower()
+    # 2) Remove accents/diacritics (NFKD)
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    # 3) Keep only a-z0-9
+    return re.sub(r'[^a-z0-9]', '', text)
 
 def normalize_country_code(isrc_normalized):
     """
@@ -76,6 +84,44 @@ def normalize_country_code(isrc_normalized):
     
     return isrc_normalized
 
+def normalize_wkd_class(wkd_class):
+    """
+    Normalise la classe Wikidata:
+    - Qxxxx -> wd:Qxxxx
+    - wdt:Qxxxx -> wd:Qxxxx (wdt n'est pas valide pour les items)
+    - wd:Qxxxx ou IRI complet -> inchangé
+    """
+    if not wkd_class:
+        return None
+    wkd_class = wkd_class.strip()
+    if wkd_class.startswith("http://") or wkd_class.startswith("https://"):
+        return f"<{wkd_class}>"
+    if wkd_class.startswith("wd:"):
+        return wkd_class
+    if wkd_class.startswith("wdt:Q"):
+        return "wd:" + wkd_class.split("wdt:", 1)[1]
+    if re.match(r'^[Qq]\d+$', wkd_class):
+        return "wd:" + wkd_class.upper()
+    return wkd_class
+
+def normalize_wikidata_property(wikidata_property):
+    """
+    Normalise la propriété Wikidata pour SPARQL:
+    - Pxx -> wdt:Pxx
+    - IRI complet -> <IRI>
+    - Prefix:suffix -> inchangé (suppose préfixe défini)
+    """
+    if not wikidata_property:
+        return None
+    wikidata_property = wikidata_property.strip()
+    if wikidata_property.startswith("<") and wikidata_property.endswith(">"):
+        return wikidata_property
+    if wikidata_property.startswith("http://") or wikidata_property.startswith("https://"):
+        return f"<{wikidata_property}>"
+    if re.match(r'^[Pp]\d+$', wikidata_property):
+        return "wdt:" + wikidata_property.upper()
+    return wikidata_property
+
 def discover_parts(class_name):
     """Découvre les parts disponibles pour une classe"""
     url = urljoin(WDC_BASE_URL, f"{class_name}/")
@@ -104,10 +150,10 @@ def discover_parts(class_name):
         print_color(f"❌ Erreur: {e}", Colors.RED)
         return []
 
-def parse_parts_spec(parts_spec, available_parts):
+def parse_parts_spec(parts_spec, available_parts=None):
     """Parse la spécification des parts (all, 0-3, 0,1,2)"""
     if parts_spec.lower() == "all":
-        return available_parts
+        return available_parts or []
     
     selected = []
     
@@ -116,20 +162,20 @@ def parse_parts_spec(parts_spec, available_parts):
         start, end = map(int, parts_spec.split('-'))
         for i in range(start, end + 1):
             part_file = f"part_{i}.gz"
-            if part_file in available_parts:
+            if available_parts is None or part_file in available_parts:
                 selected.append(part_file)
     
     # Liste: 0,1,2
     elif ',' in parts_spec:
         for num in parts_spec.split(','):
             part_file = f"part_{num.strip()}.gz"
-            if part_file in available_parts:
+            if available_parts is None or part_file in available_parts:
                 selected.append(part_file)
     
     # Single: 0
     else:
         part_file = f"part_{parts_spec}.gz"
-        if part_file in available_parts:
+        if available_parts is None or part_file in available_parts:
             selected.append(part_file)
     
     return selected
@@ -208,7 +254,7 @@ def download_and_decompress(class_name, parts, work_dir):
     
     return decompressed_files
 
-def filter_by_pattern(files, pattern, output_file):
+def filter_by_pattern(files, pattern, output_file, collect_top_props=False, top_n=100):
     """
     Filtre les lignes dont le PRÉDICAT contient le pattern
     Équivalent à: ?x <...pattern...> ?value
@@ -221,7 +267,7 @@ def filter_by_pattern(files, pattern, output_file):
     
     total_lines = 0
     matched_lines = 0
-    predicates_found = defaultdict(int)
+    predicates_found = defaultdict(int) if collect_top_props else None
     
     with open(output_file, 'w', encoding='utf-8') as out_f:
         for file_path in files:
@@ -240,6 +286,8 @@ def filter_by_pattern(files, pattern, output_file):
                     
                     if len(predicates) >= 1:
                         predicate = predicates[0]  # Premier <...> = prédicat
+                        if collect_top_props:
+                            predicates_found[predicate] += 1
                         predicate_normalized = normalize_for_matching(predicate)
                         
                         # Match si pattern dans prédicat normalisé
@@ -262,12 +310,14 @@ def filter_by_pattern(files, pattern, output_file):
     if total_lines > 0:
         print(f"   Taux global: {(matched_lines/total_lines*100):.2f}%")
     
-    # Afficher les prédicats trouvés
-    print(f"\n📋 Prédicats trouvés (top 10):")
-    for pred, count in sorted(predicates_found.items(), key=lambda x: -x[1])[:10]:
-        print(f"   {count:>6} × {pred}")
+    # Afficher les prédicats trouvés (top N)
+    if collect_top_props and predicates_found is not None:
+        print(f"\n📋 Prédicats trouvés (top {top_n}):")
+        for pred, count in sorted(predicates_found.items(), key=lambda x: -x[1])[:top_n]:
+            print(f"   {count:>8} × {pred}")
     
     return matched_lines
+
 
 def extract_unique_iris(filtered_file):
     """
@@ -353,31 +403,51 @@ def extract_unique_iris(filtered_file):
     
     return value_map
 
-def fetch_wikidata_values(wikidata_property):
-    """Récupère les valeurs depuis Wikidata pour une propriété donnée"""
+def fetch_wikidata_values(wikidata_property, wkd_class=None):
+    """Récupère les valeurs depuis Wikidata pour une propriété donnée, avec filtre de classe optionnel"""
     print_color(f"\n🌐 Récupération des valeurs Wikidata ({wikidata_property})...", Colors.BLUE)
     
-    # Extraire le PID (P1243 de wdt:P1243)
-    pid_match = re.search(r'P\d+', wikidata_property)
-    if not pid_match:
+    prop = normalize_wikidata_property(wikidata_property)
+    if not prop:
         print_color(f"❌ Format invalide: {wikidata_property}", Colors.RED)
         return {}
-    
-    pid = pid_match.group()
     
     sparql = SPARQLWrapper(WIKIDATA_ENDPOINT)
     sparql.setReturnFormat(JSON)
     sparql.setTimeout(300)
     
+    class_filter = ""
+    wkd_class_norm = normalize_wkd_class(wkd_class)
+    if wkd_class_norm:
+        class_filter = f"""
+      ?entity wdt:P31 ?type .
+      ?type wdt:P279* {wkd_class_norm} .
+    """
+    
+    property_triple = f"?entity {prop} ?value ."
+    
     query = f"""
+    PREFIX wd: <http://www.wikidata.org/entity/>
     PREFIX wdt: <http://www.wikidata.org/prop/direct/>
+    PREFIX p: <http://www.wikidata.org/prop/>
+    PREFIX ps: <http://www.wikidata.org/prop/statement/>
+    PREFIX pq: <http://www.wikidata.org/prop/qualifier/>
+    PREFIX pr: <http://www.wikidata.org/prop/reference/>
+    PREFIX wds: <http://www.wikidata.org/entity/statement/>
+    PREFIX wikibase: <http://wikiba.se/ontology#>
+    PREFIX schema: <http://schema.org/>
+    PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+    PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+    PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+    PREFIX prov: <http://www.w3.org/ns/prov#>
     
     SELECT ?entity ?value WHERE {{
-      ?entity wdt:{pid} ?value .
+      {property_triple}
+      {class_filter}
     }}
     """
     
-    print(f"   Requête SPARQL pour {pid}...")
+    print(f"   Requête SPARQL pour {prop}...")
     
     sparql.setQuery(query)
     
@@ -420,14 +490,16 @@ def fetch_wikidata_values(wikidata_property):
         print_color(f"❌ Erreur: {e}", Colors.RED)
         return {}
 
-def fuzzy_link(wdc_map, wikidata_map):
+def fuzzy_link(wdc_map, wikidata_map, compare_with_shortest=False):
     """
     Lie les entités WDC et Wikidata via fuzzy matching
     Compare sur la longueur du plus court des deux
     """
     print_color(f"\n🔗 Linking WDC ↔ Wikidata...", Colors.CYAN)
-    print("   Stratégie: Comparaison sur longueur minimale de chaque paire")
-    print("   Filtre: Longueur minimale de 8 caractères (éviter faux positifs)")
+    print("   Stratégie: Matching exact")
+    if compare_with_shortest:
+        print("   Fuzzy: Comparaison sur longueur minimale de chaque paire")
+        print("   Filtre: Longueur minimale de 8 caractères (éviter faux positifs)")
     
     MIN_LENGTH = 8  # ISRC standard = 12 chars, on tolère jusqu'à 8
     
@@ -463,6 +535,13 @@ def fuzzy_link(wdc_map, wikidata_map):
     
     print(f"   ✅ {len(exact_matches)} paires (exact)")
     
+    if not compare_with_shortest:
+        print("\n   Phase 2: Matching fuzzy désactivé (utiliser --compare-with-shortest)")
+        fuzzy_only = []
+        all_matches = exact_matches
+        print(f"   ✅ {len(all_matches)} paires (total)")
+        return all_matches, wdc_values_matched
+
     print("\n   Phase 2: Matching fuzzy (longueur minimale)...")
     
     for wdc_norm in wdc_map:
@@ -607,11 +686,12 @@ def export_results(matches, wdc_values_matched, wdc_map, wikidata_map, output_di
 def main():
     parser = argparse.ArgumentParser(description="WDC Entity Linker")
     parser.add_argument("class_name")
-    parser.add_argument("pattern")
     parser.add_argument("parts_spec")
+    parser.add_argument("pattern")
     parser.add_argument("wikidata_property")
-    parser.add_argument("--out-dir", help="Output directory (default: <ClassName>_download)")
-    parser.add_argument("--data-dir", help="Directory containing full graph or parts (.nq/.gz)")
+    parser.add_argument("--wkd-class", help="Wikidata class QID or IRI (e.g., Q6256 or wdt:Q6256) used to filter items")
+    parser.add_argument("--compare-with-shortest", action="store_true", help="Enable fuzzy matching by comparing on the shortest common prefix")
+    parser.add_argument("--top-props", action="store_true", help="Afficher le top 100 des propriétés WDC (calculé pendant le filtrage)")
     args = parser.parse_args()
     
     class_name = args.class_name
@@ -623,16 +703,17 @@ def main():
     print("🎯 WDC Entity Linker")
     print("="*60)
     print(f"Classe:              {class_name}")
-    print(f"Pattern:             {pattern}")
     print(f"Parts:               {parts_spec}")
+    print(f"Pattern:             {pattern}")
     print(f"Propriété Wikidata:  {wikidata_property}")
+    if args.wkd_class:
+        print(f"Classe Wikidata:     {normalize_wkd_class(args.wkd_class)}")
     print("="*60)
     
-    # Setup directories
-    work_dir = Path(args.out_dir or f"{class_name}_download")
-    work_dir.mkdir(exist_ok=True)
-    data_dir = Path(args.data_dir) if args.data_dir else work_dir
-    data_dir.mkdir(exist_ok=True)
+    # Setup directories (always under Download/<ClassName>)
+    work_dir = Path("Download") / class_name
+    work_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = work_dir
     
     full_graph_file = data_dir / f"{class_name}_full_graph.nq"
     use_full_graph = full_graph_file.exists()
@@ -648,38 +729,42 @@ def main():
         decompressed_files = [full_graph_file]
         print_color(f"  ✅ Full graph détecté: {full_graph_file}", Colors.GREEN)
     else:
-        local_nq = sorted(data_dir.glob("part_*.nq"))
-        if local_nq:
-            decompressed_files = local_nq
-            print_color(f"  ✅ Parts .nq détectées: {len(local_nq)}", Colors.GREEN)
+        available_parts = None
+        if parts_spec.lower() == "all":
+            available_parts = discover_parts(class_name)
+            if not available_parts:
+                print_color("❌ Aucune part disponible", Colors.RED)
+                sys.exit(1)
         else:
-            local_gz = sorted(data_dir.glob("part_*.gz"))
-            if local_gz:
-                parts = [p.name for p in local_gz]
-                decompressed_files = download_and_decompress(class_name, parts, data_dir)
-            else:
-                # Fallback: télécharger depuis WDC
-                available_parts = discover_parts(class_name)
-                if not available_parts:
-                    print_color("❌ Aucune part disponible", Colors.RED)
-                    sys.exit(1)
-                parts_to_download = parse_parts_spec(parts_spec, available_parts)
-                if not parts_to_download:
-                    print_color(f"❌ Aucune part valide pour '{parts_spec}'", Colors.RED)
-                    sys.exit(1)
-                print_color(f"\n📦 {len(parts_to_download)} parts sélectionnées", Colors.GREEN)
-                decompressed_files = download_and_decompress(class_name, parts_to_download, data_dir)
+            available_parts = discover_parts(class_name)
+            if not available_parts:
+                print_color("⚠️  Impossible de récupérer la liste distante, utilisation de la spécification locale.", Colors.YELLOW)
+                available_parts = None
+
+        parts_to_download = parse_parts_spec(parts_spec, available_parts)
+        if not parts_to_download:
+            print_color(f"❌ Aucune part valide pour '{parts_spec}'", Colors.RED)
+            sys.exit(1)
+
+        print_color(f"\n📦 {len(parts_to_download)} parts sélectionnées", Colors.GREEN)
+        decompressed_files = download_and_decompress(class_name, parts_to_download, data_dir)
     if not decompressed_files:
         print_color("❌ Aucun fichier disponible", Colors.RED)
         sys.exit(1)
-    
+
     # 4. Filtrer par pattern
     filtered_file = work_dir / f"{class_name}_filtered.nq"
     if filtered_file.exists():
         matched_count = sum(1 for _ in open(filtered_file, "r", encoding="utf-8"))
         print_color(f"  ✅ Filtré déjà existant ({matched_count} lignes)", Colors.GREEN)
     else:
-        matched_count = filter_by_pattern(decompressed_files, pattern, filtered_file)
+        matched_count = filter_by_pattern(
+            decompressed_files,
+            pattern,
+            filtered_file,
+            collect_top_props=args.top_props,
+            top_n=100,
+        )
     
     if matched_count == 0:
         print_color("❌ Aucune ligne ne matche le pattern", Colors.RED)
@@ -689,13 +774,13 @@ def main():
     wdc_map = extract_unique_iris(filtered_file)
     
     # 6. Récupérer les valeurs Wikidata
-    wikidata_map = fetch_wikidata_values(wikidata_property)
+    wikidata_map = fetch_wikidata_values(wikidata_property, args.wkd_class)
     if not wikidata_map:
         print_color("❌ Impossible de récupérer les données Wikidata", Colors.RED)
         sys.exit(1)
     
     # 7. Linking
-    matches, wdc_values_matched = fuzzy_link(wdc_map, wikidata_map)
+    matches, wdc_values_matched = fuzzy_link(wdc_map, wikidata_map, compare_with_shortest=args.compare_with_shortest)
     
     # 8. Statistiques finales
     print("\n" + "="*60)
@@ -728,7 +813,12 @@ def main():
     print(f"   SELECT COUNT(DISTINCT ?value) WHERE {{ ?s <...{pattern}...> ?value }}")
     print(f"   → Devrait être environ: {len(wdc_map):,} valeurs distinctes")
     print(f"\n   SELECT DISTINCT ?value WHERE {{")
-    print(f"     SERVICE <wikidata> {{ ?w {wikidata_property} ?value }}")
+    print(f"     SERVICE <wikidata> {{ ?w {wikidata_property} ?value")
+    if args.wkd_class:
+        wkd_class_norm = normalize_wkd_class(args.wkd_class)
+        print(f"       ?w wdt:P31 ?type .")
+        print(f"       ?type wdt:P279* {wkd_class_norm} .")
+    print(f"     }}")
     print(f"     ?s <...{pattern}...> ?value")
     print(f"   }}")
     print(f"   → {len(wdc_values_matched):,} valeurs WDC ont un match Wikidata")

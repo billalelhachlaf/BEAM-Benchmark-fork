@@ -1,0 +1,67 @@
+
+Collecting usage statistics. To deactivate, set browser.gatherUsageStats to false.
+
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8501
+  Network URL: http://129.175.28.210:8501
+  External URL: http://129.175.28.210:8501
+
+2026-02-10 15:26:46.104 Uncaught app execution
+Traceback (most recent call last):
+  File "/home/billal/.pyenv/versions/3.13.0/envs/env/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "/home/billal/.pyenv/versions/3.13.0/envs/env/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 689, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/billal/BEAM-App/app.py", line 259, in <module>
+    st.text_area("Logs", log_text[-5000:], height=200)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/billal/.pyenv/versions/3.13.0/envs/env/lib/python3.13/site-packages/streamlit/runtime/metrics_util.py", line 532, in wrapped_func
+    result = non_optional_func(*args, **kwargs)
+  File "/home/billal/.pyenv/versions/3.13.0/envs/env/lib/python3.13/site-packages/streamlit/elements/widgets/text_widgets.py", line 600, in text_area
+    return self._text_area(
+           ~~~~~~~~~~~~~~~^
+        label=label,
+        ^^^^^^^^^^^^
+    ...<12 lines>...
+        ctx=ctx,
+        ^^^^^^^^
+    )
+    ^
+  File "/home/billal/.pyenv/versions/3.13.0/envs/env/lib/python3.13/site-packages/streamlit/elements/widgets/text_widgets.py", line 647, in _text_area
+    element_id = compute_and_register_element_id(
+        "text_area",
+    ...<11 lines>...
+        width=width,
+    )
+  File "/home/billal/.pyenv/versions/3.13.0/envs/env/lib/python3.13/site-packages/streamlit/elements/lib/utils.py", line 265, in compute_and_register_element_id
+    _register_element_id(ctx, element_type, element_id)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/billal/.pyenv/versions/3.13.0/envs/env/lib/python3.13/site-packages/streamlit/elements/lib/utils.py", line 150, in _register_element_id
+    raise StreamlitDuplicateElementId(element_type)
+streamlit.errors.StreamlitDuplicateElementId: There are multiple `text_area` elements with the same auto-generated ID. When this element is created, it is assigned an internal ID based on the element type and provided parameters. Multiple elements with the same type and parameters will cause this error.
+
+To fix this error, please pass a unique `key` argument to the `text_area` element.
+2026-02-10 15:27:12.594 Uncaught app execution
+Traceback (most recent call last):
+  File "/home/billal/.pyenv/versions/3.13.0/envs/env/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "/home/billal/.pyenv/versions/3.13.0/envs/env/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 689, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/billal/BEAM-App/app.py", line 8, in <module>
+    from streamlit_autorefresh import st_autorefresh
+ModuleNotFoundError: No module named 'streamlit_autorefresh'
+2026-02-10 15:27:13.917 Uncaught app execution
+Traceback (most recent call last):
+  File "/home/billal/.pyenv/versions/3.13.0/envs/env/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "/home/billal/.pyenv/versions/3.13.0/envs/env/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 689, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/billal/BEAM-App/app.py", line 8, in <module>
+    from streamlit_autorefresh import st_autorefresh
+ModuleNotFoundError: No module named 'streamlit_autorefresh'
+  Stopping...

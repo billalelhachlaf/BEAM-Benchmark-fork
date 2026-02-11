@@ -1,60 +1,16 @@
-INFO:     Started server process [1058112]
+INFO:     Started server process [1060427]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8501 (Press CTRL+C to quit)
-INFO:     127.0.0.1:50378 - "WebSocket /ws/logs/37" [accepted]
+INFO:     127.0.0.1:56304 - "GET /?recent=39 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56316 - "GET /?recent=34 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59508 - "POST /jobs HTTP/1.1" 303 See Other
+INFO:     127.0.0.1:59508 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59300 - "WebSocket /ws/logs/40" [accepted]
 INFO:     connection open
-INFO:     127.0.0.1:50394 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52262 - "GET / HTTP/1.1" 200 OK
 INFO:     connection closed
-INFO:     127.0.0.1:50416 - "WebSocket /ws/logs/37" [accepted]
+INFO:     127.0.0.1:52276 - "WebSocket /ws/logs/40" [accepted]
 INFO:     connection open
-INFO:     127.0.0.1:50394 - "POST /jobs/37/delete HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:50394 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50394 - "GET /?recent=37 HTTP/1.1" 200 OK
 INFO:     connection closed
-INFO:     127.0.0.1:50394 - "GET /?recent=37 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50394 - "GET /favicon.ico HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50394 - "GET /?recent=37 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50394 - "GET /favicon.ico HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:50394 - "GET /?recent=37 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50394 - "GET /?recent=34 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50400 - "POST /jobs HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:50400 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:37178 - "WebSocket /ws/logs/38" [accepted]
-INFO:     connection open
-INFO:     127.0.0.1:37168 - "POST /jobs/38/cancel HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:37168 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40894 - "GET / HTTP/1.1" 200 OK
-INFO:     connection closed
-INFO:     127.0.0.1:40924 - "WebSocket /ws/logs/38" [accepted]
-INFO:     connection open
-INFO:     127.0.0.1:40910 - "GET / HTTP/1.1" 200 OK
-INFO:     connection closed
-INFO:     127.0.0.1:37352 - "WebSocket /ws/logs/38" [accepted]
-INFO:     connection open
-INFO:     127.0.0.1:40910 - "GET /favicon.ico HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:37354 - "GET / HTTP/1.1" 200 OK
-INFO:     connection closed
-INFO:     127.0.0.1:37384 - "WebSocket /ws/logs/38" [accepted]
-INFO:     connection open
-INFO:     127.0.0.1:37354 - "GET /favicon.ico HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:37354 - "GET / HTTP/1.1" 200 OK
-INFO:     connection closed
-INFO:     127.0.0.1:37398 - "WebSocket /ws/logs/38" [accepted]
-INFO:     connection open
-INFO:     127.0.0.1:37354 - "GET /favicon.ico HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:37354 - "GET / HTTP/1.1" 200 OK
-INFO:     connection closed
-INFO:     127.0.0.1:37408 - "WebSocket /ws/logs/38" [accepted]
-INFO:     connection open
-INFO:     127.0.0.1:37354 - "GET /favicon.ico HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:37370 - "POST /jobs/38/rerun_align HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:37370 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36204 - "GET / HTTP/1.1" 200 OK
-INFO:     connection closed
-INFO:     127.0.0.1:55216 - "WebSocket /ws/logs/39" [accepted]
-INFO:     connection open
-INFO:     127.0.0.1:55228 - "WebSocket /ws/logs/38" [accepted]
-INFO:     connection open
-INFO:     127.0.0.1:36206 - "POST /jobs/39/cancel_subjob/align HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:36206 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37876 - "GET / HTTP/1.1" 200 OK

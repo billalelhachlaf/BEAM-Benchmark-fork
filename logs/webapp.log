@@ -1,16 +1,4 @@
-INFO:     Started server process [1060427]
+INFO:     Started server process [1152443]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8501 (Press CTRL+C to quit)
-INFO:     127.0.0.1:56304 - "GET /?recent=39 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56316 - "GET /?recent=34 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59508 - "POST /jobs HTTP/1.1" 303 See Other
-INFO:     127.0.0.1:59508 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59300 - "WebSocket /ws/logs/40" [accepted]
-INFO:     connection open
-INFO:     127.0.0.1:52262 - "GET / HTTP/1.1" 200 OK
-INFO:     connection closed
-INFO:     127.0.0.1:52276 - "WebSocket /ws/logs/40" [accepted]
-INFO:     connection open
-INFO:     connection closed
-INFO:     127.0.0.1:37876 - "GET / HTTP/1.1" 200 OK

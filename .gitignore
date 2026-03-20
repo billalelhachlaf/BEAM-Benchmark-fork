@@ -29,6 +29,8 @@ jobs.db-*
 # Generated data/artifacts
 Download/
 data/
+data-old/
+vickey/
 reports/
 test-results/
 jobs/

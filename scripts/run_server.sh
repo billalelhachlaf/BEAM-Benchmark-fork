@@ -68,7 +68,7 @@ start_webapp() {
     return 0
   fi
   rm -f "$WEBAPP_PID_FILE"
-  nohup uvicorn webapp.main:app --host "$HOST" --port "$PORT" > logs/webapp.log 2>&1 &
+  nohup env SAKEY_MAX_CONCURRENT="${SAKEY_MAX_CONCURRENT:-2}" uvicorn webapp.main:app --host "$HOST" --port "$PORT" > logs/webapp.log 2>&1 &
   local new_pid="$!"
   echo "$new_pid" > "$WEBAPP_PID_FILE"
   sleep 0.4

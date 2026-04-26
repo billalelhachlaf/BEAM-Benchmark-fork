@@ -52,6 +52,30 @@
       padding:10px 12px;
       background:#0b0f171a;
     }
+    .sakey-box {
+      margin-top:12px;
+      border:1px solid #4b5563;
+      border-radius:8px;
+      padding:10px 12px;
+      background:#0f172a;
+    }
+    .sakey-summary-list {
+      margin:8px 0 0;
+      padding-left:16px;
+      color:#dbeafe;
+      font-size:13px;
+    }
+    .sakey-artifact-row {
+      display:grid;
+      grid-template-columns:minmax(220px,1fr) auto auto auto;
+      gap:8px;
+      align-items:center;
+      font-size:12px;
+      padding:4px 0;
+      border-top:1px dashed #334155;
+    }
+    .sakey-artifact-row:first-of-type { border-top:none; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
     .combo-box {
       margin-top:12px;
       border:1px solid #3b82f6;
@@ -197,6 +221,41 @@
           </div>
         </div>
         {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if build.sakey and build.sakey.available %}
+      <div class="sakey-box">
+        <div><b>SAKEY Insights (assist only)</b></div>
+        <div class="small">Visual help + export only. No automatic effect on linking/build pipeline.</div>
+        {% if build.sakey.primary %}
+        <div class="small" style="margin-top:6px;">
+          Primary report:
+          <span class="mono">{{ build.sakey.primary.relative_path }}</span>
+          {% if build.sakey.primary.size_h %} · {{ build.sakey.primary.size_h }}{% endif %}
+          {% if build.sakey.primary.mtime_h %} · {{ build.sakey.primary.mtime_h }}{% endif %}
+        </div>
+        {% endif %}
+        {% if build.sakey.summary_lines %}
+        <ul class="sakey-summary-list">
+          {% for line in build.sakey.summary_lines %}
+          <li>{{ line }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {% if build.sakey.artifacts %}
+        <div class="section-sep">
+          <div class="small"><b>Artifacts</b></div>
+          {% for item in build.sakey.artifacts %}
+          <div class="sakey-artifact-row">
+            <div class="mono">{{ item.relative_path }}</div>
+            <div class="small">{{ item.size_h }}</div>
+            <div class="small">{{ item.mtime_h }}</div>
+            <a class="btn" href="{{ item.download_url }}">Export</a>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
       </div>
       {% endif %}
 

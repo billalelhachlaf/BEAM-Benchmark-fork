@@ -1276,6 +1276,46 @@ def test_dashboard_api_returns_live_jobs_and_builds(monkeypatch, test_wdc_classe
     assert jobs[done_job_id]["outputs"]["build_done"] is True
 
 
+def test_dashboard_api_backfills_legacy_link_source_stats(monkeypatch, test_wdc_classes):
+    client, _web_main = _client_with_test_classes(monkeypatch, test_wdc_classes)
+    build_name = "beam_20260317_legacy"
+    build_root = Path("data") / "TestClass" / build_name
+    _make_build_tree(build_root, links_count=7, class_name="TestClass")
+
+    cfg_path = build_root / "BUILD_CONFIG.json"
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    cfg["matching_mode"] = "sameas"
+    cfg["wdc_predicate_pattern"] = "sameAs"
+    cfg["target_property"] = ""
+    cfg["wikidata_property"] = ""
+    cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+
+    # Legacy stats: missing links_by_source_* rows.
+    (build_root / "BUILD_STATS.json").write_text(
+        json.dumps(
+            {
+                "class_name": "TestClass",
+                "build_name": build_name,
+                "links_before_filters": 21,
+                "links_count_with_link_code": 7,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with client:
+        resp = client.get("/api/dashboard")
+    assert resp.status_code == 200
+    payload = resp.json()
+    entry = next((b for b in payload.get("builds", []) if b.get("build_name") == build_name), None)
+    assert entry is not None
+    assert "7 via sameas" in (entry.get("linking_stats_text") or "")
+
+    reloaded = json.loads((build_root / "BUILD_STATS.json").read_text(encoding="utf-8"))
+    assert reloaded.get("links_by_source_after_filter") == [{"source": "via sameas", "count": 7}]
+    assert reloaded.get("links_by_source_align") == [{"source": "via sameas", "count": 21}]
+
+
 def test_dashboard_api_filters_test_mode(monkeypatch, test_wdc_classes):
     client, web_main = _client_with_test_classes(monkeypatch, test_wdc_classes)
 

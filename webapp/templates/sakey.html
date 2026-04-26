@@ -1,0 +1,361 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>SAKEY Explorer</title>
+  <style>
+    :root{
+      --bg:#0e1117;
+      --card:#161b22;
+      --border:#30363d;
+      --text:#e6edf3;
+      --muted:#8b949e;
+      --primary:#2f81f7;
+    }
+    *{ box-sizing:border-box; }
+    body { margin:0; font-family:"IBM Plex Sans", system-ui, sans-serif; color:var(--text); background:var(--bg); }
+    .page { max-width:1200px; margin:0 auto; padding:24px; }
+    .back-link { display:inline-block; color:#93c5fd; text-decoration:none; margin-bottom:12px; }
+    .grid { display:grid; grid-template-columns:360px 1fr; gap:16px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; }
+    h1 { margin:0 0 16px; font-size:28px; }
+    h2 { margin:0 0 8px; font-size:20px; }
+    .small { color:var(--muted); font-size:12px; }
+    .row { display:grid; gap:8px; margin-bottom:10px; }
+    label { font-size:12px; font-weight:600; color:#cdd9e5; }
+    input, select, button { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border); background:#1f2630; color:#e6edf3; }
+    button { cursor:pointer; background:#1d4ed8; border-color:#2563eb; }
+    .run-list { max-height:420px; overflow:auto; border-top:1px dashed var(--border); margin-top:8px; padding-top:8px; }
+    .run-item { border:1px solid var(--border); border-radius:8px; padding:8px; margin-bottom:8px; background:#0f1724; }
+    .run-item.active { border-color:#3b82f6; background:#13233a; }
+    .run-item a { color:#bfdbfe; text-decoration:none; }
+    .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; border:1px solid var(--border); }
+    .pill.running { color:#fef3c7; border-color:#b45309; background:#3b2a11; }
+    .pill.completed { color:#dcfce7; border-color:#166534; background:#112a1a; }
+    .pill.error, .pill.timeout { color:#fee2e2; border-color:#b91c1c; background:#3a1212; }
+    .pill.queued { color:#dbeafe; border-color:#1d4ed8; background:#13233a; }
+    .pill.waiting { color:#fde68a; border-color:#a16207; background:#3a2a11; }
+    .pill.legacy { color:#cbd5e1; border-color:#475569; background:#1e293b; }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th, td { border-bottom:1px solid var(--border); text-align:left; padding:6px 8px; vertical-align:top; }
+    th { color:#93c5fd; font-weight:600; }
+    pre { margin:0; max-height:220px; overflow:auto; padding:10px; border:1px solid var(--border); border-radius:8px; background:#0b1220; font-size:12px; }
+    .artifacts a { color:#bfdbfe; }
+    .inline-grid { display:grid; grid-template-columns:repeat(5,minmax(120px,1fr)); gap:8px; margin-top:10px; }
+    .inline-grid .checkline { display:flex; align-items:center; gap:6px; margin-top:22px; font-size:12px; color:#cdd9e5; }
+    .inline-grid .checkline input { width:auto; margin:0; }
+    @media (max-width:980px) {
+      .grid { grid-template-columns:1fr; }
+      .inline-grid { grid-template-columns:1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <a class="back-link" href="/{% if is_test_mode %}?test_mode=1{% endif %}">&larr; Back to dashboard</a>
+    <h1>SAKEY Explorer</h1>
+    <div class="small">Assist-only page: launch SAKEY on a class and inspect candidate keys. No automatic pipeline effect.</div>
+    {% if form_error %}
+    <div class="card" style="margin-top:10px; border-color:#ef4444; color:#fecaca;">{{ form_error }}</div>
+    {% endif %}
+    <div class="grid" style="margin-top:12px;">
+      <div class="card">
+        <h2>Run SAKEY</h2>
+        <form method="post" action="/sakey/run">
+          {% if is_test_mode %}<input type="hidden" name="test_mode" value="1" />{% endif %}
+          <div class="row">
+            <label>Class</label>
+            <select name="class_name" required>
+              <option value="" {% if not selected_class %}selected{% endif %} disabled>(select class)</option>
+              {% for c in class_options %}
+              <option value="{{ c }}" {% if selected_class == c %}selected{% endif %}>{{ c }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="row">
+            <label>Parts spec</label>
+            <input name="parts_spec" value="{{ form_parts_spec }}" placeholder="all, 1,2,4 or 1-10" />
+          </div>
+          <div class="row">
+            <label>Min support</label>
+            <input name="mins" type="number" value="{{ form_mins }}" min="1" />
+          </div>
+          <div class="row">
+            <label>Timeout (hours)</label>
+            <input name="timeout_hours" type="number" value="{{ form_timeout_hours }}" min="0.1" step="0.1" />
+          </div>
+          <button type="submit">Launch</button>
+        </form>
+        <div class="small" style="margin-top:8px;">Runs are executed in background (capacity: {{ sakey_max_concurrent }} at a time).</div>
+        <div class="small" style="margin-top:4px;">Auto-refresh enabled while a run is queued/waiting/running.</div>
+
+        <div class="run-list" id="sakey-active-list">
+          {% for r in active_jobs %}
+          {% set rid = r.get("run_id","") %}
+          <div class="run-item {% if selected_run and selected_run.get('run_id') == rid %}active{% endif %}">
+            <div>
+              <span class="pill {{ (r.get('status') or 'queued')|lower }}">{{ r.get("status", "queued") }}</span>
+              <a href="/sakey?{% if selected_class %}class_name={{ selected_class|urlencode }}&{% endif %}run_id={{ rid|urlencode }}&key_order_by={{ key_filters.order_by|urlencode }}&key_min_support={{ key_filters.min_support|urlencode }}&key_max_size={{ key_filters.max_key_size|urlencode }}&key_q={{ key_filters.q|urlencode }}{% if key_filters.only_almost %}&key_only_almost=1{% endif %}{% if is_test_mode %}&test_mode=1{% endif %}">{{ rid }}</a>
+            </div>
+            <div class="small">{{ r.get("class_name","") }} · parts={{ r.get("parts_spec","all") }} · created={{ r.get("created_at_h","") }}</div>
+            {% if r.get("keys_candidates_count") %}
+            <div class="small">{{ r.get("keys_candidates_count") }} key candidates</div>
+            {% endif %}
+          </div>
+          {% else %}
+          <div class="small">No active job.</div>
+          {% endfor %}
+        </div>
+        <div class="small" style="margin-top:8px;"><b>History runs</b></div>
+        <div class="run-list" id="sakey-history-list" style="max-height:280px;">
+          {% for r in history_runs %}
+          {% set rid = r.get("run_id","") %}
+          <div class="run-item {% if selected_run and selected_run.get('run_id') == rid %}active{% endif %}">
+            <div>
+              <span class="pill {{ (r.get('status') or 'queued')|lower }}">{{ r.get("status", "queued") }}</span>
+              <a href="/sakey?{% if selected_class %}class_name={{ selected_class|urlencode }}&{% endif %}run_id={{ rid|urlencode }}&key_order_by={{ key_filters.order_by|urlencode }}&key_min_support={{ key_filters.min_support|urlencode }}&key_max_size={{ key_filters.max_key_size|urlencode }}&key_q={{ key_filters.q|urlencode }}{% if key_filters.only_almost %}&key_only_almost=1{% endif %}{% if is_test_mode %}&test_mode=1{% endif %}">{{ rid }}</a>
+            </div>
+            <div class="small">{{ r.get("class_name","") }} · parts={{ r.get("parts_spec","all") }} · created={{ r.get("created_at_h","") }}</div>
+            {% if r.get("keys_candidates_count") %}
+            <div class="small">{{ r.get("keys_candidates_count") }} key candidates</div>
+            {% endif %}
+          </div>
+          {% else %}
+          <div class="small">No history run.</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="card" id="sakey-result-card">
+        <h2>Results</h2>
+        {% if selected_run %}
+        <div class="small">Run: <b>{{ selected_run.get("run_id","") }}</b></div>
+        <div class="small">Status: {{ selected_run.get("status","") }}{% if selected_run.get("error") %} · error: {{ selected_run.get("error") }}{% endif %}</div>
+        <div class="small">
+          Class: {{ selected_run.get("class_name","") }} · parts={{ selected_run.get("parts_spec","all") }} · files={{ selected_run.get("selected_parts_count",0) }}
+        </div>
+        {% if selected_run.get("key_summary") %}
+        <div class="small" style="margin-top:6px;">
+          Summary:
+          {{ selected_run.get("key_summary", {}).get("conditional_keys_count", "n/a") }} conditional keys,
+          {{ selected_run.get("key_summary", {}).get("keys_count", "n/a") }} keys,
+          {{ selected_run.get("key_summary", {}).get("non_keys_found", "n/a") }} non-keys
+        </div>
+        {% endif %}
+
+        <div class="artifacts" style="margin-top:8px;" id="sakey-artifacts">
+          <div class="small"><b>Artifacts</b></div>
+          {% for a in artifacts %}
+          <div class="small"><a href="{{ a.url }}">{{ a.name }}</a>{% if a.size_h %} · {{ a.size_h }}{% endif %}</div>
+          {% else %}
+          <div class="small">No artifact yet.</div>
+          {% endfor %}
+        </div>
+
+        <div style="margin-top:10px;" id="sakey-keys-wrap">
+          <div class="small"><b>Candidate keys (readable)</b></div>
+          <div class="inline-grid">
+            <div>
+              <label>Order by</label>
+              <select id="key-order-by">
+                <option value="coverage_desc" {% if key_filters.order_by == 'coverage_desc' %}selected{% endif %}>Coverage (desc)</option>
+                <option value="support_desc" {% if key_filters.order_by == 'support_desc' %}selected{% endif %}>Support (desc)</option>
+                <option value="size_asc" {% if key_filters.order_by == 'size_asc' %}selected{% endif %}>Key size (asc)</option>
+                <option value="type_then_coverage" {% if key_filters.order_by == 'type_then_coverage' %}selected{% endif %}>Type then coverage</option>
+              </select>
+            </div>
+            <div>
+              <label>Min support</label>
+              <input id="key-min-support" type="number" min="0" value="{{ key_filters.min_support }}" />
+            </div>
+            <div>
+              <label>Max key size</label>
+              <input id="key-max-size" type="number" min="0" value="{{ key_filters.max_key_size }}" />
+            </div>
+            <div>
+              <label>Search</label>
+              <input id="key-q" type="text" value="{{ key_filters.q }}" placeholder="iata, isbn, ror..." />
+            </div>
+            <div class="checkline">
+              <input id="key-only-almost" type="checkbox" {% if key_filters.only_almost %}checked{% endif %} />
+              <span>Only almost keys</span>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Type</th>
+                <th>Support</th>
+                <th>Coverage</th>
+                <th>Size</th>
+                <th>Score</th>
+              </tr>
+            </thead>
+            <tbody id="sakey-keys-body">
+              {% for k in keys_candidates %}
+              <tr>
+                <td>{{ k.key }}</td>
+                <td>{{ k.type or k.condition }}</td>
+                <td>{{ k.support }}</td>
+                <td>{{ k.coverage or 'n/a' }}</td>
+                <td>{{ k.key_size or '' }}</td>
+                <td>{{ k.score }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="6" class="small">No parsed key candidates yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div style="margin-top:10px;" id="sakey-log-wrap">
+          <div class="small"><b>Run log (tail)</b></div>
+          <pre id="sakey-log-tail">{% for l in log_tail %}{{ l }}
+{% endfor %}</pre>
+        </div>
+        {% else %}
+        <div class="small" id="sakey-empty-result">Select or launch a run to see results.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      let selectedClass = {{ (selected_class or '') | tojson }};
+      let selectedRunId = {{ (selected_run_id or '') | tojson }};
+      let selectedStatus = {{ (selected_run.get('status','') if selected_run else '') | tojson }}.toLowerCase();
+      let keyFilters = {{ (key_filters or {}) | tojson }};
+      const isTestMode = {{ 1 if is_test_mode else 0 }};
+      const activeStates = new Set(['queued', 'waiting', 'running']);
+      const activeListEl = document.getElementById('sakey-active-list');
+      const historyListEl = document.getElementById('sakey-history-list');
+      const keysBodyEl = document.getElementById('sakey-keys-body');
+      const logTailEl = document.getElementById('sakey-log-tail');
+      const artifactsEl = document.getElementById('sakey-artifacts');
+      const emptyResultEl = document.getElementById('sakey-empty-result');
+      const keyOrderByEl = document.getElementById('key-order-by');
+      const keyMinSupportEl = document.getElementById('key-min-support');
+      const keyMaxSizeEl = document.getElementById('key-max-size');
+      const keyOnlyAlmostEl = document.getElementById('key-only-almost');
+      const keyQEl = document.getElementById('key-q');
+
+      function esc(s){
+        return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      }
+      function runHref(runId){
+        const qs = new URLSearchParams();
+        if (selectedClass) qs.set('class_name', selectedClass);
+        qs.set('run_id', runId || '');
+        if (keyFilters.order_by) qs.set('key_order_by', keyFilters.order_by);
+        if (keyFilters.min_support) qs.set('key_min_support', String(keyFilters.min_support));
+        if (keyFilters.max_key_size) qs.set('key_max_size', String(keyFilters.max_key_size));
+        if (keyFilters.q) qs.set('key_q', keyFilters.q);
+        if (keyFilters.only_almost) qs.set('key_only_almost', '1');
+        if (isTestMode) qs.set('test_mode', '1');
+        return '/sakey?' + qs.toString();
+      }
+      function renderRunList(container, rows, emptyText){
+        if (!container) return;
+        if (!Array.isArray(rows) || !rows.length){
+          container.innerHTML = `<div class="small">${esc(emptyText)}</div>`;
+          return;
+        }
+        container.innerHTML = rows.map((r) => {
+          const rid = String((r && r.run_id) || '');
+          const status = String((r && r.status) || 'queued');
+          const cls = String((r && r.class_name) || '');
+          const parts = String((r && r.parts_spec) || 'all');
+          const created = String((r && r.created_at_h) || '');
+          const kcnt = Number((r && r.keys_candidates_count) || 0);
+          const active = rid === selectedRunId ? 'active' : '';
+          return `<div class="run-item ${active}">
+            <div><span class="pill ${esc(status.toLowerCase())}">${esc(status)}</span> <a href="${runHref(rid)}">${esc(rid)}</a></div>
+            <div class="small">${esc(cls)} · parts=${esc(parts)} · created=${esc(created)}</div>
+            ${kcnt > 0 ? `<div class="small">${kcnt} key candidates</div>` : ''}
+          </div>`;
+        }).join('');
+      }
+      function renderKeys(rows){
+        if (!keysBodyEl) return;
+        if (!Array.isArray(rows) || !rows.length){
+          keysBodyEl.innerHTML = '<tr><td colspan="6" class="small">No parsed key candidates yet.</td></tr>';
+          return;
+        }
+        keysBodyEl.innerHTML = rows.map((k) => `<tr>
+          <td>${esc(k.key)}</td><td>${esc(k.type || k.condition)}</td><td>${esc(k.support)}</td><td>${esc(k.coverage || 'n/a')}</td><td>${esc(k.key_size || '')}</td><td>${esc(k.score)}</td>
+        </tr>`).join('');
+      }
+      function renderArtifacts(rows){
+        if (!artifactsEl) return;
+        let html = '<div class="small"><b>Artifacts</b></div>';
+        if (!Array.isArray(rows) || !rows.length){
+          html += '<div class="small">No artifact yet.</div>';
+          artifactsEl.innerHTML = html;
+          return;
+        }
+        for (const a of rows){
+          html += `<div class="small"><a href="${esc(a.url || '#')}">${esc(a.name || '')}</a>${a.size_h ? ` · ${esc(a.size_h)}` : ''}</div>`;
+        }
+        artifactsEl.innerHTML = html;
+      }
+      function renderLog(lines){
+        if (!logTailEl) return;
+        logTailEl.textContent = Array.isArray(lines) ? lines.join('\n') : '';
+      }
+      function applyPayload(payload){
+        if (!payload || !payload.ok) return;
+        const run = payload.selected_run || null;
+        selectedRunId = run && run.run_id ? String(run.run_id) : selectedRunId;
+        selectedStatus = run && run.status ? String(run.status).toLowerCase() : '';
+        keyFilters = payload.key_filters || keyFilters;
+        renderRunList(activeListEl, payload.active_jobs || [], 'No active job.');
+        renderRunList(historyListEl, payload.history_runs || [], 'No history run.');
+        renderKeys(payload.keys_candidates || []);
+        renderArtifacts(payload.artifacts || []);
+        renderLog(payload.log_tail || []);
+        if (emptyResultEl) emptyResultEl.style.display = run ? 'none' : '';
+      }
+
+      async function poll() {
+        const qs = new URLSearchParams();
+        if (selectedClass) qs.set('class_name', selectedClass);
+        if (selectedRunId) qs.set('run_id', selectedRunId);
+        if (keyFilters.order_by) qs.set('key_order_by', keyFilters.order_by);
+        if (keyFilters.min_support) qs.set('key_min_support', String(keyFilters.min_support));
+        if (keyFilters.max_key_size) qs.set('key_max_size', String(keyFilters.max_key_size));
+        if (keyFilters.q) qs.set('key_q', keyFilters.q);
+        if (keyFilters.only_almost) qs.set('key_only_almost', '1');
+        if (isTestMode) qs.set('test_mode', '1');
+        const url = '/api/sakey/status?' + qs.toString();
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) return;
+        const payload = await res.json();
+        applyPayload(payload);
+      }
+
+      function bindFilterInputs() {
+        function updateFilters() {
+          keyFilters = {
+            order_by: (keyOrderByEl && keyOrderByEl.value) || 'coverage_desc',
+            min_support: Number((keyMinSupportEl && keyMinSupportEl.value) || 0) || 0,
+            max_key_size: Number((keyMaxSizeEl && keyMaxSizeEl.value) || 0) || 0,
+            only_almost: !!(keyOnlyAlmostEl && keyOnlyAlmostEl.checked),
+            q: (keyQEl && keyQEl.value || '').trim().toLowerCase(),
+          };
+          poll().catch(() => {});
+        }
+        if (keyOrderByEl) keyOrderByEl.addEventListener('change', updateFilters);
+        if (keyMinSupportEl) keyMinSupportEl.addEventListener('change', updateFilters);
+        if (keyMaxSizeEl) keyMaxSizeEl.addEventListener('change', updateFilters);
+        if (keyOnlyAlmostEl) keyOnlyAlmostEl.addEventListener('change', updateFilters);
+        if (keyQEl) keyQEl.addEventListener('change', updateFilters);
+      }
+
+      bindFilterInputs();
+      poll().catch(() => {});
+      setInterval(() => { poll().catch(() => {}); }, 2500);
+    })();
+  </script>
+</body>
+</html>

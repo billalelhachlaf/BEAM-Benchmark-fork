@@ -14,6 +14,9 @@ This README focuses on how to install, run, and operate the app.
 For a fresh VM deployment guide, see:
 - `docs/DEPLOYMENT_VM.md`
 
+Full documentation index:
+- `docs/README.md`
+
 ## What Runs In This Project
 
 Main components:
@@ -76,6 +79,11 @@ Restart everything:
 ```bash
 bash scripts/restart_server.sh
 ```
+
+Detailed guides:
+- Admin guide: `docs/admin/README.md`
+- User guide: `docs/user/README.md`
+- Current limits: `docs/limits.md`
 
 ## Run On A Remote Server (SSH Tunnel)
 

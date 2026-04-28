@@ -1,19 +1,18 @@
-# Guide admin
+# Admin Guide
 
-## Parcours recommande
+## Recommended Reading Order
 
-1. Lire [setup, installation, run](setup_install_run.md)
-2. Lire [architecture](architecture.md)
-3. Lire [operations](operations.md)
-4. Lire [backup/restore](backup_restore.md)
-5. Lire [troubleshooting](troubleshooting.md)
+1. [setup_install_run.md](setup_install_run.md)
+2. [architecture.md](architecture.md)
+3. [operations.md](operations.md)
+4. [backup_restore.md](backup_restore.md)
+5. [troubleshooting.md](troubleshooting.md)
 
-## Objectif
+## Admin Objectives
 
-Ce guide permet a un admin de:
-
-- installer BEAM-App sur une machine neuve,
-- lancer et redemarrer les services,
-- surveiller les jobs,
-- sauvegarder/restaurer l'etat,
-- diagnostiquer les incidents courants.
+After this guide, an admin should be able to:
+- deploy BEAM-App on a fresh machine,
+- run and restart services safely,
+- monitor jobs and investigate failures,
+- backup and restore operational state,
+- validate production readiness.

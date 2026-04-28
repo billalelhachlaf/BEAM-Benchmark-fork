@@ -1,62 +1,56 @@
-# Troubleshooting (admin)
+# Troubleshooting Guide
 
-## Webapp inaccessible
-
-Symptome: `ERR_CONNECTION_REFUSED`.
+## Webapp not reachable
 
 Checks:
 
 ```bash
 bash scripts/check_health.sh
 ss -ltnp | rg ':8501'
-tail -n 100 logs/webapp.log
+tail -n 200 logs/webapp.log
 ```
 
-Causes frequentes:
+Common causes:
+- process not started
+- wrong bind host/port
+- firewall/proxy restrictions
 
-- webapp non lance,
-- bind sur mauvais host,
-- port bloque par firewall/proxy.
-
-## Jobs bloques en queue
+## Worker not consuming jobs
 
 Checks:
 
 ```bash
-tail -n 200 logs/worker.log
-python - <<'PY'
-import sqlite3
-c=sqlite3.connect('jobs.db')
-print(c.execute("select status,count(*) from jobs group by status").fetchall())
-PY
+tail -n 300 logs/worker.log
+sqlite3 jobs.db "select status,count(*) from jobs group by status;"
 ```
 
 Actions:
+- restart services
+- inspect latest job errors
+- verify runtime permissions for `data/` and `Download/`
 
-- redemarrer worker,
-- annuler jobs bloques,
-- relancer sans cache si necessaire.
+## Jobs fail with 0 links
 
-## Builds avec 0 liens
+Likely causes:
+- wrong predicate mapping
+- too strict property/class filters
+- sparse source values
 
-Verifier:
+Actions:
+- test with smaller parts
+- try alternative matching recipe
+- rerun align without cache
 
-- classe cible,
-- patterns de linking,
-- endpoint/prop cible,
-- mode (`sameAs` vs `property`).
+## Slow / unstable runs
 
-Action:
+Actions:
+- reduce `parts_spec`
+- decrease concurrency if memory pressure
+- increase Wikidata timeout/retries
 
-- tester un mapping plus robuste,
-- forcer align sans cache,
-- verifier le filtre de classe endpoint.
+## SAKEY errors
 
-## SAKEY en erreur
-
-Verifier:
-
-- qualite des parts (triples valides),
-- support minimum trop strict,
-- ressources machine (RAM/CPU),
-- logs `run.log` et output SAKEY.
+Checks:
+- `SAKEY` runner availability
+- resource pressure (RAM/CPU)
+- run artifacts and logs under data runtime paths

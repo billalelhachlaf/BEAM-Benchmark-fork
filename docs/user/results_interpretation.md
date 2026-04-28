@@ -1,30 +1,29 @@
-# Interpreting results
+# Results Interpretation
 
-## Build summary
+## Build-Level Questions
 
-Dans l'UI build:
+Ask these first:
+- Did the job finish (`done`) without fallback errors?
+- Is links volume plausible for class size?
+- Are there clear property signals in stats files?
 
-- `Links`: nombre final de liens.
-- variantes (`with_link_code`, `without_link_code`).
-- stats sources linking (si disponibles).
+## File Semantics
 
-## Fichiers importants
+- `ent_links`: canonical aligned entity pairs (WDC -> Wikidata).
+- `attr_triples_1` / `rel_triples_1`: WDC-side attributes/relations.
+- `attr_triples_2` / `rel_triples_2`: Wikidata-side attributes/relations.
+- `prop_stats_wdc.tsv`: source property frequencies.
+- `prop_stats_wd.tsv`: target property frequencies.
 
-- `ent_links`: couples d'entites liees.
-- `attr_triples_1` / `attr_triples_2`: attributs cibles/source.
-- `rel_triples_1` / `rel_triples_2`: relations internes.
-- `BUILD_STATS.json`: metriques globales.
-- `BUILD_CONFIG.json`: config exacte du run.
+## Quality Heuristics
 
-## SAKEY Explorer
+- Very low links: likely mapping mismatch or overly strict filters.
+- Excessively high links: possible noisy key/predicate selection.
+- Sparse relation files: over-filtering or weak graph connectivity.
 
-- `support`: nb de sujets couverts par la combinaison.
-- `coverage`: proportion de sujets couverts (samplee si gros volume).
-- `type=almost_key`: candidat potentiellement discriminant.
-- `type=non_key`: combinaison non discriminante.
+## Iteration Strategy
 
-## Signaux d'alerte
-
-- Liens tres faibles vs historique classe.
-- Absence complete `attr_*`/`rel_*`.
-- Variantes incoherentes pour meme config.
+1. Adjust one variable at a time.
+2. Re-run on subset parts.
+3. Compare links volume and property distributions.
+4. Promote best config to full-scale run.

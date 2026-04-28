@@ -1,56 +1,64 @@
-# Tutoriel utilisateur
+# User Tutorial (Detailed)
 
-## 1. Ouvrir l'application
+## Step 1: Open the App
 
-- Aller sur `http://<host>:8501`.
-- Verifier que l'etat est OK (jobs/builds visibles).
+- Go to `http://<host>:8501`.
+- Confirm dashboard loads with jobs/history blocks.
 
-## 2. Configurer un job
+## Step 2: Fill Job Configuration
 
-Champs principaux:
+Main fields:
+- `Class name`: WDC class (e.g. `Movie`, `City`, `Language`).
+- `Parts spec`: `all`, `1,2,3`, or `1-5`.
+- `WDC predicate pattern`: source property hint (`name`, `sameAs`, `eidr`, ...).
+- `Wikidata property`: target mapping (`Pxxxx`, `wdt:Pxxxx`, or `rdfs:label`).
+- `Wikidata class (QID)`: optional semantic filter.
+- `Max depth`: traversal depth through blank nodes.
+- `WDC values are Wikidata URLs`: direct-link mode toggle.
+- `Ignore align cache`: force fresh alignment.
+- `Use local parts only`: disable downloads for missing parts.
 
-- `Class name`: classe WDC (ex: `Airport`, `Book`, `Museum`).
-- `Parts spec`: `all` ou sous-ensemble (`0-2`, `0,1,2`).
-- `Matching mode`: `property`, `sameAs`, ou combinaisons (OR via mapping rules).
-- `Target endpoint`: `wikidata`, `dbpedia`, `yago`.
-- `Property mapping rules`: regles de linking.
-- `Ignore align cache`: force recalcul alignement.
+Rule reminders:
+- if URL mode is OFF, Wikidata property is required.
+- if URL mode is ON, Wikidata class is required.
 
-## 3. Lancer et suivre
+## Step 3: Launch Job
 
-- Cliquer `Generate benchmark`.
-- Suivre progression dans `Jobs`:
-  - `align` puis `build`.
-- Consulter les logs en direct depuis le job.
+- Click `Generate benchmark`.
+- Job appears with status `queued`.
+- Worker transitions it to `running`.
 
-## 4. Lire les resultats
+## Step 4: Monitor Execution
 
-Quand `build` est termine:
+- Watch subjobs (`align`, `build`).
+- Open live logs for details.
+- If needed, cancel and rerun with adjusted parameters.
 
-- Ouvrir le build dans `History`.
-- Verifier les stats (`links`, sources de linking, etc.).
-- Telecharger le build si besoin.
+## Step 5: Inspect Completed Build
 
-Fichiers importants:
+Open build detail and verify:
+- links count,
+- build metadata,
+- output directories (`with_link_code`, `without_link_code`).
 
-- `ent_links`: liens trouves.
-- `attr_triples_*`: attributs.
-- `rel_triples_*`: relations.
-- `BUILD_STATS.json`: statistiques de run.
+## Step 6: Download Output
 
-## 5. SAKEY Explorer (assist)
+Use download action from build page.
 
-- Ouvrir `SAKEY Explorer` depuis le dashboard.
-- Lancer SAKEY sur une classe.
-- Trier/filtrer les cles candidates:
-  - ordre par `coverage` ou `support`,
-  - filtre `only almost keys`,
-  - recherche texte (`iata`, `isbn`, etc.).
+Typical files:
+- `ent_links`
+- `attr_triples_1`, `rel_triples_1`
+- `attr_triples_2`, `rel_triples_2`
+- property stats files
 
-Attention: SAKEY est une aide d'exploration, pas une modification automatique du pipeline de build.
+## Step 7: Iterate for Better Quality
 
-## 6. Bonnes pratiques
+- Start with small `parts_spec`.
+- Validate matching behavior quickly.
+- Scale to `all` only after good signal.
 
-- Commencer avec une classe/petit `parts_spec` pour valider la config.
-- Prioriser Wikidata pour iterer rapidement.
-- Relancer sans cache seulement en cas de changement de logique de linking.
+## Optional: SAKEY Explorer
+
+- Open SAKEY page from dashboard.
+- Explore key candidates for property strategy refinement.
+- Treat as assistive analysis, not automatic pipeline mutation.

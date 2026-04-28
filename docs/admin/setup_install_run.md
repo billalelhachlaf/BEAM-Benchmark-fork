@@ -1,12 +1,13 @@
-# Setup, installation, run (admin)
+# Admin Tutorial: Setup, Installation, Run
 
-## 1. Prerequis
+## 1. Prerequisites
 
-- Linux avec Python 3.12+ recommande.
-- Acces reseau sortant vers endpoints et sources de donnees.
-- `git`, `curl`, `bash` disponibles.
+- Linux host (Ubuntu/Debian recommended)
+- Python 3.8+
+- `git`, `bash`, `curl`
+- Outbound network access for Wikidata/WDC retrieval
 
-## 2. Installation
+## 2. Install
 
 ```bash
 git clone <repo-url>
@@ -16,57 +17,57 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Option tests:
+Optional dev/test dependencies:
 
 ```bash
 pip install -r requirements-dev.txt
 ```
 
-## 3. Demarrage standard
+## 3. Configure Environment (Optional)
+
+Example:
+
+```bash
+export MAX_CONCURRENT_JOBS=4
+export JOB_POLL_INTERVAL=1
+export ALIGN_MAX_WORKERS=8
+export WIKIDATA_QUERY_TIMEOUT=300
+```
+
+## 4. Start Services
 
 ```bash
 bash scripts/run_server.sh
 ```
 
-Verification:
+Then check health:
 
 ```bash
 bash scripts/check_health.sh
 ```
 
-URL:
+Open:
+- `http://127.0.0.1:8501` (local)
+- `http://<server-ip>:8501` (remote)
 
-- local: `http://127.0.0.1:8501`
-- remote: `http://<host>:8501`
-
-## 4. Arret / restart
+## 5. Stop / Restart
 
 ```bash
 bash scripts/stop_server.sh
 bash scripts/restart_server.sh
 ```
 
-## 5. Variables d'environnement utiles
+## 6. Smoke Test Procedure
 
-- `MAX_CONCURRENT_JOBS`: concurrence worker jobs.
-- `JOB_POLL_INTERVAL`: frequence de polling worker.
-- `SAKEY_MAX_CONCURRENT`: concurrence runs SAKEY.
-- `WEBAPP_HOST`: host bind webapp (par defaut `0.0.0.0`).
+1. Open dashboard.
+2. Launch a small test-class run.
+3. Confirm state transitions: `queued -> running -> done`.
+4. Open build detail page.
+5. Download generated build.
 
-Exemple:
+## 7. Operational Security Basics
 
-```bash
-MAX_CONCURRENT_JOBS=2 SAKEY_MAX_CONCURRENT=1 bash scripts/restart_server.sh
-```
-
-## 6. Verification fonctionnelle rapide (smoke test)
-
-1. Ouvrir le dashboard.
-2. Lancer un build sur une petite classe locale/test.
-3. Verifier passage `queued -> running -> done`.
-4. Verifier telechargement build.
-
-## 7. Notes de securite
-
-- Ne pas exposer `jobs.db` ni les dossiers `Download/` et `data/` au web public.
-- Utiliser un reverse proxy pour l'exposition internet.
+- Do not expose `jobs.db` publicly.
+- Keep `Download/` and `data/` private.
+- Put app behind a reverse proxy for internet exposure.
+- Restrict SSH and firewall access.

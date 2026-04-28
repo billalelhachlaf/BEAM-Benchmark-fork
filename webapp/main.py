@@ -4386,6 +4386,21 @@ def index(
     )
 
 
+@app.get("/help", response_class=HTMLResponse)
+def help_page(
+    request: Request,
+    test_mode: Optional[str] = None,
+):
+    is_test_mode = _bool_from_any(test_mode)
+    return templates.TemplateResponse(
+        request,
+        "help.html",
+        {
+            "is_test_mode": is_test_mode,
+        },
+    )
+
+
 @app.get("/sakey", response_class=HTMLResponse)
 def sakey_page(
     request: Request,

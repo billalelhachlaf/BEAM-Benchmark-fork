@@ -104,8 +104,11 @@ def _split_worker(args):
                 continue
             s, p, o = parsed
             s_inner = s[1:-1] if s.startswith("<") and s.endswith(">") else s
+            s_inner_norm = normalize_entity_token(s_inner, lowercase_wd=lowercase_wd)
             p_norm = _normalize_prop_token(p)
-            if s_inner not in targets_inner:
+            if linked_entities_inner and s.startswith("<") and s_inner_norm not in linked_entities_inner:
+                continue
+            if s_inner_norm not in targets_inner:
                 continue
             if exclude_props_norm and p_norm in exclude_props_norm:
                 continue
@@ -131,14 +134,21 @@ def _split_worker(args):
             else:
                 if o.startswith("<") and linked_entities_inner:
                     o_inner = o[1:-1]
-                    if o_inner not in linked_entities_inner:
+                    o_inner_norm = normalize_entity_token(o_inner, lowercase_wd=lowercase_wd)
+                    if o_inner_norm not in linked_entities_inner:
                         continue
                 rel_out.write(f"{s_out}\t{p_out}\t{o_out}\n")
                 kept_rel += 1
                 if o.startswith("_:"):
                     new_subjects.add(o)
                 elif follow_iri_objects and o.startswith("<"):
-                    new_subjects.add(o)
+                    if not linked_entities_inner:
+                        new_subjects.add(normalize_entity_token(o, lowercase_wd=lowercase_wd))
+                    else:
+                        o_inner = o[1:-1]
+                        o_inner_norm = normalize_entity_token(o_inner, lowercase_wd=lowercase_wd)
+                        if o_inner_norm in linked_entities_inner:
+                            new_subjects.add(o_inner_norm)
     size = os.path.getsize(input_path)
     return tmp_attr, tmp_rel, new_subjects, line_count, kept_attr, kept_rel, size
 
@@ -325,11 +335,19 @@ def read_links(path, sep, wdc_col, wd_col, wdc_value_col, wd_value_col):
 
 def normalize_wd_uri(value, lowercase):
     # Normalize URI token shape first so all downstream files use a stable form.
-    if value.startswith("<") and value.endswith(">"):
-        value = value[1:-1]
-    if lowercase and value.startswith("http://www.wikidata.org/"):
-        return value.lower()
-    return value
+    text = (value or "").strip()
+    if text.startswith("<") and text.endswith(">"):
+        text = text[1:-1]
+    if "wikidata.org/" in text.lower():
+        # Canonical entity URI (stable host + uppercase Q/P id).
+        ent = canonical_wd_link_entity_uri(text)
+        if ent != text.strip("<>"):
+            return ent
+        # Canonical property URI tails (Pxxx uppercase), stable host.
+        m = re.match(r"^https?://(?:www\.)?wikidata\.org/(prop(?:/[^/]+)*/)([Pp]\d+)$", text)
+        if m:
+            return f"http://www.wikidata.org/{m.group(1)}{m.group(2).upper()}"
+    return text
 
 
 def transform_triple(s, p, o, lowercase):
@@ -348,6 +366,8 @@ def write_links(path, wdc_entities, wd_entities, dedupe):
             wdc = wdc.strip().strip("<>")
             wd = canonical_wd_link_entity_uri(wd)
             if not wdc or not wd:
+                continue
+            if not is_allowed_wdc_subject(wdc):
                 continue
             if dedupe:
                 key = (wdc, wd)
@@ -443,14 +463,17 @@ def split_triples(
     os.makedirs(os.path.dirname(out_attr_path), exist_ok=True)
     os.makedirs(os.path.dirname(out_rel_path), exist_ok=True)
 
-    keep_subjects = set(s for s in seed_subjects if s)
+    keep_subjects = set(
+        normalize_entity_token(s, lowercase_wd=lowercase_wd)
+        for s in seed_subjects
+        if s
+    )
     linked_entities_inner = set()
     for value in list(linked_entity_iris or []):
         token = str(value or "").strip()
         if not token:
             continue
-        if token.startswith("<") and token.endswith(">"):
-            token = token[1:-1]
+        token = normalize_entity_token(token, lowercase_wd=lowercase_wd)
         linked_entities_inner.add(token)
     processed_subjects = set()
 
@@ -469,8 +492,7 @@ def split_triples(
                 token = str(value or "").strip()
                 if not token:
                     continue
-                if token.startswith("<") and token.endswith(">"):
-                    token = token[1:-1]
+                token = normalize_entity_token(token, lowercase_wd=lowercase_wd)
                 targets_inner.add(token)
             new_subjects = set()
             line_count = 0
@@ -774,6 +796,75 @@ def canonical_wd_link_entity_uri(uri):
     if not qid:
         return uri.strip("<>")
     return f"http://www.wikidata.org/entity/{qid}"
+
+
+_ESCAPED_URI_RE = re.compile(r"\\\\[ux][0-9a-fA-F]{2,4}")
+
+
+def _decode_escaped_uri_token(token):
+    text = (token or "").strip()
+    if not text:
+        return text
+    if not _ESCAPED_URI_RE.search(text):
+        return text
+    try:
+        return bytes(text, "utf-8").decode("unicode_escape")
+    except Exception:
+        return text
+
+
+def normalize_entity_token(token, lowercase_wd=False):
+    text = (token or "").strip().strip("<>")
+    if not text:
+        return text
+    text = _decode_escaped_uri_token(text)
+    if lowercase_wd:
+        text = normalize_wd_uri(text, lowercase=True)
+    if "wikidata.org/entity/" in text.lower():
+        text = canonical_wd_link_entity_uri(text)
+    return text
+
+
+def is_allowed_wdc_subject(token):
+    text = (token or "").strip()
+    if text.startswith("<") and text.endswith(">"):
+        text = text[1:-1]
+    return text.startswith("_:")
+
+
+def filter_triples_by_subject_membership(
+    in_attr,
+    in_rel,
+    out_attr,
+    out_rel,
+    allowed_subjects,
+    lowercase_wd=False,
+):
+    allowed = set()
+    for s in list(allowed_subjects or []):
+        n = normalize_entity_token(s, lowercase_wd=lowercase_wd)
+        if n:
+            allowed.add(n)
+    os.makedirs(os.path.dirname(out_attr), exist_ok=True)
+    os.makedirs(os.path.dirname(out_rel), exist_ok=True)
+
+    def _copy_filtered(inp, outp):
+        kept = 0
+        with open(inp, "r", encoding="utf-8") as fin, open(outp, "w", encoding="utf-8") as fout:
+            for line in fin:
+                parts = line.rstrip("\n").split("\t", 1)
+                if len(parts) < 2:
+                    continue
+                subj = normalize_entity_token(parts[0], lowercase_wd=lowercase_wd)
+                if subj not in allowed:
+                    continue
+                fout.write(line)
+                kept += 1
+        return kept
+
+    kept_attr = _copy_filtered(in_attr, out_attr)
+    kept_rel = _copy_filtered(in_rel, out_rel)
+    return kept_attr, kept_rel
 
 
 def collect_wikidata_uris(attr_path, rel_path):
@@ -1220,6 +1311,24 @@ def run_pipeline(
     out_prop_stats_wdc = os.path.join(out_dir, "prop_stats_wdc.tsv")
     out_prop_stats_wd = os.path.join(out_dir, "prop_stats_wd.tsv")
 
+    # Keep only WDC entities with blank-node identifiers.
+    filtered_wdc = []
+    filtered_wd_raw = []
+    filtered_wdc_values = []
+    filtered_wd_values = []
+    for idx, (wdc_ent, wd_ent_raw) in enumerate(zip(wdc_entities, wd_entities_raw)):
+        wdc_norm = str(wdc_ent or "").strip().strip("<>")
+        if not is_allowed_wdc_subject(wdc_norm):
+            continue
+        filtered_wdc.append(wdc_norm)
+        filtered_wd_raw.append(wd_ent_raw)
+        filtered_wdc_values.append(wdc_values[idx] if idx < len(wdc_values) else "")
+        filtered_wd_values.append(wd_values[idx] if idx < len(wd_values) else "")
+    wdc_entities = filtered_wdc
+    wd_entities_raw = filtered_wd_raw
+    wdc_values = filtered_wdc_values
+    wd_values = filtered_wd_values
+
     wd_entities_out = [
         canonical_wd_link_entity_uri(
             normalize_wd_uri(replace_map.get(uri, uri), lowercase_wd)
@@ -1256,7 +1365,7 @@ def run_pipeline(
             args.wd_nq,
             wd_attr_tmp,
             wd_rel_tmp,
-            seed_subjects=wd_entities_raw,
+            seed_subjects=wd_linked_entities_filter if linked_only_entities else wd_entities_raw,
             max_depth=args.max_depth,
             lowercase_wd=lowercase_wd,
             mask_values=wd_mask_values,
@@ -1286,6 +1395,19 @@ def run_pipeline(
                 args.backoff,
                 lowercase_wd,
             )
+        if linked_only_entities:
+            tmp_attr = out_attr_2 + ".linked"
+            tmp_rel = out_rel_2 + ".linked"
+            filter_triples_by_subject_membership(
+                out_attr_2,
+                out_rel_2,
+                tmp_attr,
+                tmp_rel,
+                wd_linked_entities_filter,
+                lowercase_wd=lowercase_wd,
+            )
+            os.replace(tmp_attr, out_attr_2)
+            os.replace(tmp_rel, out_rel_2)
     else:
         wd_attr_tmp = out_attr_2
         wd_rel_tmp = out_rel_2
@@ -1334,6 +1456,19 @@ def run_pipeline(
                 args.backoff,
                 lowercase_wd,
             )
+        if linked_only_entities:
+            tmp_attr = out_attr_2 + ".linked"
+            tmp_rel = out_rel_2 + ".linked"
+            filter_triples_by_subject_membership(
+                out_attr_2,
+                out_rel_2,
+                tmp_attr,
+                tmp_rel,
+                wd_linked_entities_filter,
+                lowercase_wd=lowercase_wd,
+            )
+            os.replace(tmp_attr, out_attr_2)
+            os.replace(tmp_rel, out_rel_2)
     write_prop_stats_wdc(out_prop_stats_wdc, out_attr_1, out_rel_1, args.wdc_nq)
     write_prop_stats(
         out_prop_stats_wd,

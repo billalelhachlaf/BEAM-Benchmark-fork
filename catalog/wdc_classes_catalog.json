@@ -1,1 +1,252 @@
-[]
+[
+  {
+    "class_name": "AdministrativeArea",
+    "num_parts": 8,
+    "size_human": "1.13 GB"
+  },
+  {
+    "class_name": "Airport",
+    "num_parts": 5,
+    "size_human": "455.06 MB"
+  },
+  {
+    "class_name": "Answer",
+    "num_parts": 118,
+    "size_human": "23.75 GB"
+  },
+  {
+    "class_name": "Book",
+    "num_parts": 19,
+    "size_human": "3.66 GB"
+  },
+  {
+    "class_name": "City",
+    "num_parts": 17,
+    "size_human": "2.33 GB"
+  },
+  {
+    "class_name": "ClaimReview",
+    "num_parts": 1,
+    "size_human": "56.3 MB"
+  },
+  {
+    "class_name": "CollegeOrUniversity",
+    "num_parts": 6,
+    "size_human": "1.06 GB"
+  },
+  {
+    "class_name": "Continent",
+    "num_parts": 1,
+    "size_human": "7.28 MB"
+  },
+  {
+    "class_name": "Country",
+    "num_parts": 61,
+    "size_human": "10.21 GB"
+  },
+  {
+    "class_name": "CreativeWork",
+    "num_parts": 162,
+    "size_human": "68.24 GB"
+  },
+  {
+    "class_name": "Dataset",
+    "num_parts": 5,
+    "size_human": "655.18 MB"
+  },
+  {
+    "class_name": "EducationalOrganization",
+    "num_parts": 6,
+    "size_human": "810.6 MB"
+  },
+  {
+    "class_name": "Event",
+    "num_parts": 133,
+    "size_human": "20.83 GB"
+  },
+  {
+    "class_name": "FAQPage",
+    "num_parts": 104,
+    "size_human": "19.89 GB"
+  },
+  {
+    "class_name": "GeoCoordinates",
+    "num_parts": 237,
+    "size_human": "33.28 GB"
+  },
+  {
+    "class_name": "GovernmentOrganization",
+    "num_parts": 3,
+    "size_human": "305.5 MB"
+  },
+  {
+    "class_name": "Hospital",
+    "num_parts": 2,
+    "size_human": "185.01 MB"
+  },
+  {
+    "class_name": "Hotel",
+    "num_parts": 17,
+    "size_human": "3.19 GB"
+  },
+  {
+    "class_name": "JobPosting",
+    "num_parts": 14,
+    "size_human": "4.86 GB"
+  },
+  {
+    "class_name": "LakeBodyOfWater",
+    "num_parts": 1,
+    "size_human": "0.63 MB"
+  },
+  {
+    "class_name": "LandmarksOrHistoricalBuildings",
+    "num_parts": 1,
+    "size_human": "49.11 MB"
+  },
+  {
+    "class_name": "Language",
+    "num_parts": 46,
+    "size_human": "9.82 GB"
+  },
+  {
+    "class_name": "Library",
+    "num_parts": 1,
+    "size_human": "75.56 MB"
+  },
+  {
+    "class_name": "LocalBusiness",
+    "num_parts": 176,
+    "size_human": "23.23 GB"
+  },
+  {
+    "class_name": "Mountain",
+    "num_parts": 1,
+    "size_human": "2.56 MB"
+  },
+  {
+    "class_name": "Movie",
+    "num_parts": 12,
+    "size_human": "1.82 GB"
+  },
+  {
+    "class_name": "Museum",
+    "num_parts": 1,
+    "size_human": "47.21 MB"
+  },
+  {
+    "class_name": "MusicAlbum",
+    "num_parts": 5,
+    "size_human": "755.87 MB"
+  },
+  {
+    "class_name": "MusicRecording",
+    "num_parts": 7,
+    "size_human": "1.08 GB"
+  },
+  {
+    "class_name": "Organization",
+    "num_parts": 3072,
+    "size_human": "488.41 GB"
+  },
+  {
+    "class_name": "Painting",
+    "num_parts": 1,
+    "size_human": "75.59 MB"
+  },
+  {
+    "class_name": "Park",
+    "num_parts": 1,
+    "size_human": "6.27 MB"
+  },
+  {
+    "class_name": "Person",
+    "num_parts": 1953,
+    "size_human": "401.48 GB"
+  },
+  {
+    "class_name": "Place",
+    "num_parts": 246,
+    "size_human": "38.3 GB"
+  },
+  {
+    "class_name": "Product",
+    "num_parts": 1658,
+    "size_human": "242.98 GB"
+  },
+  {
+    "class_name": "QAPage",
+    "num_parts": 12,
+    "size_human": "2.76 GB"
+  },
+  {
+    "class_name": "Question",
+    "num_parts": 120,
+    "size_human": "23.99 GB"
+  },
+  {
+    "class_name": "RadioStation",
+    "num_parts": 1,
+    "size_human": "161.49 MB"
+  },
+  {
+    "class_name": "Recipe",
+    "num_parts": 21,
+    "size_human": "3.84 GB"
+  },
+  {
+    "class_name": "Restaurant",
+    "num_parts": 11,
+    "size_human": "1.59 GB"
+  },
+  {
+    "class_name": "RiverBodyOfWater",
+    "num_parts": 1,
+    "size_human": "1.38 MB"
+  },
+  {
+    "class_name": "School",
+    "num_parts": 1,
+    "size_human": "113.51 MB"
+  },
+  {
+    "class_name": "SearchAction",
+    "num_parts": 2194,
+    "size_human": "265.53 GB"
+  },
+  {
+    "class_name": "ShoppingCenter",
+    "num_parts": 2,
+    "size_human": "157.32 MB"
+  },
+  {
+    "class_name": "SkiResort",
+    "num_parts": 1,
+    "size_human": "15.61 MB"
+  },
+  {
+    "class_name": "SportsEvent",
+    "num_parts": 9,
+    "size_human": "901.17 MB"
+  },
+  {
+    "class_name": "SportsTeam",
+    "num_parts": 8,
+    "size_human": "810.39 MB"
+  },
+  {
+    "class_name": "StadiumOrArena",
+    "num_parts": 2,
+    "size_human": "108.79 MB"
+  },
+  {
+    "class_name": "TVEpisode",
+    "num_parts": 3,
+    "size_human": "249.69 MB"
+  },
+  {
+    "class_name": "TelevisionStation",
+    "num_parts": 1,
+    "size_human": "21.03 MB"
+  }
+]

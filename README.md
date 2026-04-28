@@ -16,6 +16,7 @@ For a fresh VM deployment guide, see:
 
 Full documentation index:
 - `docs/README.md`
+- Quick in-app help: `/help`
 
 ## What Runs In This Project
 
@@ -84,6 +85,12 @@ Detailed guides:
 - Admin guide: `docs/admin/README.md`
 - User guide: `docs/user/README.md`
 - Current limits: `docs/limits.md`
+
+Documentation validation:
+
+```bash
+bash scripts/docs_check.sh
+```
 
 ## Run On A Remote Server (SSH Tunnel)
 

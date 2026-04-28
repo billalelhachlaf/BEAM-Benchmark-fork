@@ -12,6 +12,7 @@ Cette documentation est organisee en 3 blocs:
 - [Guide utilisateur](user/README.md)
 - [Limites actuelles](limits.md)
 - [Checklist qualite](QUALITY_CHECKLIST.md)
+- [Template audit](AUDIT_TEMPLATE.md)
 - [Deploiement VM](DEPLOYMENT_VM.md)
 - [Reference Wikidata](wikidata_reference.md)
 

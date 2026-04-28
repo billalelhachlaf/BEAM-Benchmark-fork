@@ -39,6 +39,12 @@ x
 # Local helper files
 sync.sh
 
+# Heavy local experiment artifacts (never commit)
+$NT
+keys.nt
+SAKEY/
+bert-int/
+
 # OS/Editor
 .DS_Store
 .idea/

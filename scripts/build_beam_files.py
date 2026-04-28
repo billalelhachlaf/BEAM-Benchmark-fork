@@ -339,14 +339,15 @@ def normalize_wd_uri(value, lowercase):
     if text.startswith("<") and text.endswith(">"):
         text = text[1:-1]
     if "wikidata.org/" in text.lower():
-        # Canonical entity URI (stable host + uppercase Q/P id).
-        ent = canonical_wd_link_entity_uri(text)
-        if ent != text.strip("<>"):
-            return ent
-        # Canonical property URI tails (Pxxx uppercase), stable host.
+        # Property URIs stay in the prop namespace.
         m = re.match(r"^https?://(?:www\.)?wikidata\.org/(prop(?:/[^/]+)*/)([Pp]\d+)$", text)
         if m:
-            return f"http://www.wikidata.org/{m.group(1)}{m.group(2).upper()}"
+            pid = m.group(2).lower() if lowercase else m.group(2).upper()
+            return f"http://www.wikidata.org/{m.group(1)}{pid}"
+        # Canonical entity URI with caller-controlled case policy.
+        ent = canonical_wd_link_entity_uri(text, lowercase=lowercase)
+        if ent != text.strip("<>"):
+            return ent
     return text
 
 
@@ -788,13 +789,15 @@ def _extract_wikidata_entity_id(uri):
     return None
 
 
-def canonical_wd_link_entity_uri(uri):
+def canonical_wd_link_entity_uri(uri, lowercase=False):
     uri = (uri or "").strip()
     if not uri:
         return uri
     qid = _extract_wikidata_entity_id(uri)
     if not qid:
         return uri.strip("<>")
+    if lowercase:
+        qid = qid.lower()
     return f"http://www.wikidata.org/entity/{qid}"
 
 
@@ -821,7 +824,7 @@ def normalize_entity_token(token, lowercase_wd=False):
     if lowercase_wd:
         text = normalize_wd_uri(text, lowercase=True)
     if "wikidata.org/entity/" in text.lower():
-        text = canonical_wd_link_entity_uri(text)
+        text = canonical_wd_link_entity_uri(text, lowercase=lowercase_wd)
     return text
 
 
@@ -829,7 +832,7 @@ def is_allowed_wdc_subject(token):
     text = (token or "").strip()
     if text.startswith("<") and text.endswith(">"):
         text = text[1:-1]
-    return text.startswith("_:")
+    return text.startswith("_:") or text.startswith("http://") or text.startswith("https://")
 
 
 def filter_triples_by_subject_membership(

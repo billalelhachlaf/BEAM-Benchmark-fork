@@ -16,6 +16,7 @@ For a fresh VM deployment guide, see:
 
 Full documentation index:
 - `docs/README.md`
+- `docs/PROJECT_STRUCTURE.md`
 - Quick in-app help: `/help`
 
 ## What Runs In This Project

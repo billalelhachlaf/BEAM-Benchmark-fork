@@ -37,6 +37,17 @@ is_pid_running() {
   kill -0 "${pid}" >/dev/null 2>&1
 }
 
+find_running_pid() {
+  local pattern="$1"
+  local pid=""
+  pid="$(pgrep -f "$pattern" | head -n1 || true)"
+  if [[ -n "$pid" ]] && is_pid_running "$pid"; then
+    echo "$pid"
+    return 0
+  fi
+  return 1
+}
+
 read_pid_file() {
   local file="$1"
   if [[ ! -f "$file" ]]; then
@@ -56,6 +67,11 @@ start_worker() {
     echo "[OK] worker already running (pid=$pid)"
     return 0
   fi
+  if pid="$(find_running_pid "[p]ython(3)? -m worker.run")"; then
+    echo "$pid" > "$WORKER_PID_FILE"
+    echo "[OK] worker already running (pid=$pid, pid file repaired)"
+    return 0
+  fi
   rm -f "$WORKER_PID_FILE"
   nohup env MAX_CONCURRENT_JOBS="${MAX_CONCURRENT_JOBS:-8}" JOB_POLL_INTERVAL="${JOB_POLL_INTERVAL:-1}" "$PY_BIN" -m worker.run > logs/worker.log 2>&1 &
   local new_pid="$!"
@@ -73,6 +89,11 @@ start_webapp() {
   local pid=""
   if pid="$(read_pid_file "$WEBAPP_PID_FILE")" && is_pid_running "$pid"; then
     echo "[OK] webapp already running (pid=$pid)"
+    return 0
+  fi
+  if pid="$(find_running_pid "[u]vicorn webapp.main:app.*--port ${PORT}")"; then
+    echo "$pid" > "$WEBAPP_PID_FILE"
+    echo "[OK] webapp already running (pid=$pid, pid file repaired)"
     return 0
   fi
   rm -f "$WEBAPP_PID_FILE"

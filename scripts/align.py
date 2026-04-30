@@ -1142,6 +1142,33 @@ def download_file(url, dest_path):
         except Exception:
             pass
 
+
+def download_file_with_retries(url, dest_path, attempts=5, base_sleep=2.0):
+    """Télécharge avec retries bornés pour les erreurs réseau transitoires."""
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            download_file(url, dest_path)
+            return
+        except Exception as e:
+            if "Cancelled" in str(e):
+                raise
+            last_error = e
+            try:
+                if Path(dest_path).exists():
+                    Path(dest_path).unlink()
+            except Exception:
+                pass
+            if attempt >= attempts:
+                break
+            wait_s = base_sleep * attempt
+            print_color(
+                f"  ⚠️ Échec téléchargement ({attempt}/{attempts}): {e}. Retry dans {wait_s:.1f}s...",
+                Colors.YELLOW,
+            )
+            time.sleep(wait_s)
+    raise last_error
+
 def _decompress_worker(gz_path, nq_path):
     gz_path = Path(gz_path)
     nq_path = Path(nq_path)
@@ -1193,7 +1220,7 @@ def download_and_decompress(class_name, parts, work_dir, parallel_decompress=Tru
             url = urljoin(WDC_BASE_URL, f"{class_name}/{part_file}")
             print(f"  ⬇️  Téléchargement depuis {url}")
             try:
-                download_file(url, gz_path)
+                download_file_with_retries(url, gz_path)
                 size = gz_path.stat().st_size / (1024**2)
                 print_color(f"  ✅ Téléchargé ({size:.1f} MB)", Colors.GREEN)
             except Exception as e:
@@ -1261,7 +1288,7 @@ def download_and_decompress(class_name, parts, work_dir, parallel_decompress=Tru
                 try:
                     url = urljoin(WDC_BASE_URL, f"{class_name}/{part_file}")
                     print(f"  🔁 Retry download: {url}")
-                    download_file(url, gz_path)
+                    download_file_with_retries(url, gz_path, attempts=3, base_sleep=2.0)
                     _decompress_worker(str(gz_path), str(nq_path))
                     size = nq_path.stat().st_size / (1024**2)
                     print_color(f"  ✅ Retry OK ({nq_path.name}, {size:.1f} MB)", Colors.GREEN)

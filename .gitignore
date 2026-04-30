@@ -16,7 +16,9 @@ venv/
 env/
 
 # Runtime logs/state
+.env
 logs/
+docker-data/
 *.log
 worker.log
 jobs.db

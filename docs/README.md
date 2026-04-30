@@ -13,6 +13,7 @@ This documentation is organized by audience and depth.
 
 - Overview: [admin/README.md](admin/README.md)
 - Setup/install/run: [admin/setup_install_run.md](admin/setup_install_run.md)
+- Docker deployment: [admin/docker_deploy.md](admin/docker_deploy.md)
 - Architecture: [admin/architecture.md](admin/architecture.md)
 - Operations: [admin/operations.md](admin/operations.md)
 - Backup/restore: [admin/backup_restore.md](admin/backup_restore.md)

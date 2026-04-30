@@ -7,10 +7,10 @@ This checklist verifies that the tool is functional, structured, and documented.
 Run all checks:
 
 ```bash
-source .venv/bin/activate
 pytest -q
-bash scripts/check_health.sh
 bash scripts/docs_check.sh
+docker compose up -d --build
+docker compose exec webapp bash scripts/check_health.sh
 ```
 
 Expected:

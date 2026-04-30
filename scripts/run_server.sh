@@ -4,8 +4,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-if ! command -v uvicorn >/dev/null 2>&1; then
-  echo "[ERR] uvicorn not found. Run: pip install -r requirements.txt" >&2
+PY_BIN="python"
+UVICORN_BIN="uvicorn"
+if [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+  PY_BIN="$ROOT_DIR/.venv/bin/python"
+fi
+if [[ -x "$ROOT_DIR/.venv/bin/uvicorn" ]]; then
+  UVICORN_BIN="$ROOT_DIR/.venv/bin/uvicorn"
+fi
+if ! command -v "$UVICORN_BIN" >/dev/null 2>&1; then
+  echo "[ERR] uvicorn not found. Run: bash scripts/setup_no_sudo.sh" >&2
   exit 1
 fi
 
@@ -49,7 +57,7 @@ start_worker() {
     return 0
   fi
   rm -f "$WORKER_PID_FILE"
-  nohup env MAX_CONCURRENT_JOBS="${MAX_CONCURRENT_JOBS:-8}" JOB_POLL_INTERVAL="${JOB_POLL_INTERVAL:-1}" python -m worker.run > logs/worker.log 2>&1 &
+  nohup env MAX_CONCURRENT_JOBS="${MAX_CONCURRENT_JOBS:-8}" JOB_POLL_INTERVAL="${JOB_POLL_INTERVAL:-1}" "$PY_BIN" -m worker.run > logs/worker.log 2>&1 &
   local new_pid="$!"
   echo "$new_pid" > "$WORKER_PID_FILE"
   sleep 0.2
@@ -68,7 +76,7 @@ start_webapp() {
     return 0
   fi
   rm -f "$WEBAPP_PID_FILE"
-  nohup env SAKEY_MAX_CONCURRENT="${SAKEY_MAX_CONCURRENT:-2}" uvicorn webapp.main:app --host "$HOST" --port "$PORT" > logs/webapp.log 2>&1 &
+  nohup env SAKEY_MAX_CONCURRENT="${SAKEY_MAX_CONCURRENT:-2}" "$UVICORN_BIN" webapp.main:app --host "$HOST" --port "$PORT" > logs/webapp.log 2>&1 &
   local new_pid="$!"
   echo "$new_pid" > "$WEBAPP_PID_FILE"
   sleep 0.4

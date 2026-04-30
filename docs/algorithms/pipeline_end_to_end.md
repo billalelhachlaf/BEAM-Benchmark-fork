@@ -80,6 +80,6 @@ Per variant (`with_link_code` / `without_link_code`):
 
 ```bash
 python scripts/create_testclass_data.py
-bash scripts/run_server.sh
+docker compose up -d --build
 # Submit a TestClass preset from the UI
 ```

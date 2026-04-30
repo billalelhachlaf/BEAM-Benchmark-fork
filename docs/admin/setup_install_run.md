@@ -1,10 +1,10 @@
-# Admin Tutorial: Setup, Installation, Run
+# Admin Tutorial: Docker Setup, Installation, Run
 
 ## 1. Prerequisites
 
 - Linux host (Ubuntu/Debian recommended)
-- Python 3.8+
-- `git`, `bash`, `curl`
+- Docker Engine with Docker Compose
+- `git`
 - Outbound network access for Wikidata/WDC retrieval
 
 ## 2. Install
@@ -12,62 +12,44 @@
 ```bash
 git clone <repo-url>
 cd BEAM-App
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
 ```
 
-Optional dev/test dependencies:
+## 3. Configure Environment
+
+Optional values can be placed in `.env` or exported in the shell before
+starting Docker:
 
 ```bash
-pip install -r requirements-dev.txt
+MAX_CONCURRENT_JOBS=2
+JOB_POLL_INTERVAL=1
+ALIGN_MAX_WORKERS=8
+WIKIDATA_QUERY_TIMEOUT=300
 ```
 
-## 3. Configure Environment (Optional)
-
-Example:
+## 4. Start
 
 ```bash
-export MAX_CONCURRENT_JOBS=4
-export JOB_POLL_INTERVAL=1
-export ALIGN_MAX_WORKERS=8
-export WIKIDATA_QUERY_TIMEOUT=300
-```
-
-## 4. Start Services
-
-```bash
-bash scripts/run_server.sh
+docker compose up -d --build
 ```
 
 Then check health:
 
 ```bash
-bash scripts/check_health.sh
+docker compose exec webapp bash scripts/check_health.sh
 ```
 
 Open:
-- `http://127.0.0.1:8501` (local)
-- `http://<server-ip>:8501` (remote)
+- `http://127.0.0.1`
+- `http://<server-ip>`
 
 ## 5. Stop / Restart
 
 ```bash
-bash scripts/stop_server.sh
-bash scripts/restart_server.sh
+docker compose down
+docker compose restart
 ```
 
-## 6. Easy Server Deployment (port 80)
-
-For a VM/public server, use:
-
-```bash
-sudo bash scripts/setup_server_deploy.sh --server-name <server-ip-or-domain>
-```
-
-This single command bootstraps Python deps, creates `systemd` services (`beam-webapp`, `beam-worker`), and configures `nginx` on port `80`.
-
-## 7. Smoke Test Procedure
+## 6. Smoke Test Procedure
 
 1. Open dashboard.
 2. Launch a small test-class run.
@@ -75,9 +57,9 @@ This single command bootstraps Python deps, creates `systemd` services (`beam-we
 4. Open build detail page.
 5. Download generated build.
 
-## 8. Operational Security Basics
+## 7. Operational Security Basics
 
 - Do not expose `jobs.db` publicly.
 - Keep `Download/` and `data/` private.
-- Put app behind a reverse proxy for internet exposure.
+- Keep `docker-data/` private and backed up.
 - Restrict SSH and firewall access.

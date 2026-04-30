@@ -9,19 +9,16 @@ This page is the entrypoint. Full detailed documentation is in `docs/`.
 ```bash
 git clone <your-repo-url>
 cd BEAM-App
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-bash scripts/run_server.sh
+docker compose up -d --build
 ```
 
 Open:
-- `http://localhost:8501`
+- `http://localhost`
 
 Stop:
 
 ```bash
-bash scripts/stop_server.sh
+docker compose down
 ```
 
 ## Documentation Map
@@ -34,7 +31,7 @@ bash scripts/stop_server.sh
 - Developer guide (how to modify code): [docs/dev/README.md](docs/dev/README.md)
 - Verification and quality gates: [docs/verification/README.md](docs/verification/README.md)
 - Current limits: [docs/limits.md](docs/limits.md)
-- VM deployment guide: [docs/DEPLOYMENT_VM.md](docs/DEPLOYMENT_VM.md)
+- Docker deployment guide: [docs/admin/docker_deploy.md](docs/admin/docker_deploy.md)
 - In-app help page: `/help`
 
 ## What Runs In This Project
@@ -52,25 +49,21 @@ Runtime data:
 - `jobs.db`: jobs/subjobs/events state.
 - `logs/webapp.log`, `logs/worker.log`: runtime logs.
 
-## Run Modes
+## Run Mode
 
-Recommended:
-
-```bash
-bash scripts/run_server.sh
-```
-
-Manual split mode:
+Docker is the only supported runtime:
 
 ```bash
-python -m worker.run
-uvicorn webapp.main:app --host 0.0.0.0 --port 8501
+docker compose up -d --build
 ```
+
+Open `http://localhost`. Runtime data is kept in `docker-data/`. See
+[docs/admin/docker_deploy.md](docs/admin/docker_deploy.md).
 
 ## Health + Validation Commands
 
 ```bash
-bash scripts/check_health.sh
+docker compose exec webapp bash scripts/check_health.sh
 bash scripts/docs_check.sh
 pytest -q
 ```

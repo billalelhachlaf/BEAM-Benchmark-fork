@@ -17,6 +17,9 @@ is_pid_running() {
 find_running_pid() {
   local pattern="$1"
   local pid=""
+  if ! command -v pgrep >/dev/null 2>&1; then
+    return 1
+  fi
   pid="$(pgrep -f "$pattern" | head -n1 || true)"
   if is_pid_running "$pid"; then
     echo "$pid"
@@ -54,8 +57,10 @@ status_pid() {
   fi
 }
 
-status_pid "$ROOT_DIR/.run/webapp.pid" "webapp" "[u]vicorn webapp.main:app.*--port ${PORT}"
-status_pid "$ROOT_DIR/.run/worker.pid" "worker" "[p]ython(3)? -m worker.run"
+if [[ ! -f /.dockerenv ]]; then
+  status_pid "$ROOT_DIR/.run/webapp.pid" "webapp" "[u]vicorn webapp.main:app.*--port ${PORT}"
+  status_pid "$ROOT_DIR/.run/worker.pid" "worker" "[p]ython(3)? -m worker.run"
+fi
 
 if curl -fsS "$BASE_URL/" >/dev/null 2>&1; then
   echo "[OK] webapp HTTP reachable at $BASE_URL"

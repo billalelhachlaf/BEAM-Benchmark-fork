@@ -8,9 +8,6 @@ SPARQLWrapper
 pandas
 numpy
 
-# For BERT-INT integration
-torch
-transformers
 scikit-learn
 
 # Utilities

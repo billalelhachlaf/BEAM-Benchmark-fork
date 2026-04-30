@@ -2,9 +2,10 @@
 
 ## A sauvegarder
 
-- `jobs.db`
-- `data/`
-- `Download/` (optionnel mais recommande si downloads/caches couteux)
+- `docker-data/jobs.db`
+- `docker-data/data/`
+- `docker-data/Download/` (optionnel mais recommande si downloads/caches couteux)
+- `docker-data/logs/`
 - `catalog/wdc_classes_catalog.json`
 
 ## Backup rapide
@@ -12,7 +13,7 @@
 ```bash
 mkdir -p backups
 tar -czf backups/beam_backup_$(date +%F_%H%M%S).tgz \
-  jobs.db data Download catalog/wdc_classes_catalog.json logs
+  docker-data catalog/wdc_classes_catalog.json
 ```
 
 ## Restore
@@ -20,7 +21,7 @@ tar -czf backups/beam_backup_$(date +%F_%H%M%S).tgz \
 1. Arreter services:
 
 ```bash
-bash scripts/stop_server.sh
+docker compose down
 ```
 
 2. Restaurer archive:
@@ -32,8 +33,8 @@ tar -xzf backups/beam_backup_<DATE>.tgz -C /home/<user>/BEAM-App
 3. Redemarrer:
 
 ```bash
-bash scripts/restart_server.sh
-bash scripts/check_health.sh
+docker compose up -d
+docker compose exec webapp bash scripts/check_health.sh
 ```
 
 ## Validation post-restore

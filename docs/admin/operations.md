@@ -2,49 +2,48 @@
 
 ## Runtime State Locations
 
-- `jobs.db`: job queue + statuses + events
-- `logs/webapp.log`: UI/API logs
-- `logs/worker.log`: worker/pipeline logs
-- `Download/`: fetched WDC + align cache
-- `data/`: generated outputs
+- `docker-data/jobs.db`: job queue + statuses + events
+- `docker-data/logs/`: runtime logs
+- `docker-data/Download/`: fetched WDC + align cache
+- `docker-data/data/`: generated outputs
 
 ## Daily Commands
 
 Health check:
 
 ```bash
-bash scripts/check_health.sh
+docker compose exec webapp bash scripts/check_health.sh
 ```
 
 Tail logs:
 
 ```bash
-tail -f logs/webapp.log
-tail -f logs/worker.log
+docker compose logs -f
 ```
 
 Restart stack:
 
 ```bash
-bash scripts/restart_server.sh
+docker compose restart
 ```
 
 ## Release Upgrade Routine
 
 ```bash
 git pull
-source .venv/bin/activate
-pip install -r requirements.txt
-pytest -q
-bash scripts/restart_server.sh
-bash scripts/check_health.sh
+docker compose up -d --build
+docker compose exec webapp bash scripts/check_health.sh
 ```
 
 ## Database Quick Inspection
 
 ```bash
-sqlite3 jobs.db "select status,count(*) from jobs group by status;"
-sqlite3 jobs.db "select id,status,created_at from jobs order by created_at desc limit 20;"
+docker compose exec -T webapp python - <<'PY'
+import sqlite3
+conn = sqlite3.connect("jobs.db")
+for row in conn.execute("select status,count(*) from jobs group by status"):
+    print(row)
+PY
 ```
 
 ## Cleanup Policy

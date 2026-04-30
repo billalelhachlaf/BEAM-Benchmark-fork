@@ -5,14 +5,14 @@
 Checks:
 
 ```bash
-bash scripts/check_health.sh
-ss -ltnp | rg ':8501'
-tail -n 200 logs/webapp.log
+docker compose ps
+docker compose exec webapp bash scripts/check_health.sh
+docker compose logs --tail=200 webapp
 ```
 
 Common causes:
-- process not started
-- wrong bind host/port
+- container not started
+- host port `80` already in use
 - firewall/proxy restrictions
 
 ## Worker not consuming jobs
@@ -20,14 +20,19 @@ Common causes:
 Checks:
 
 ```bash
-tail -n 300 logs/worker.log
-sqlite3 jobs.db "select status,count(*) from jobs group by status;"
+docker compose logs --tail=300 worker
+docker compose exec -T webapp python - <<'PY'
+import sqlite3
+conn = sqlite3.connect("jobs.db")
+for row in conn.execute("select status,count(*) from jobs group by status"):
+    print(row)
+PY
 ```
 
 Actions:
-- restart services
+- `docker compose restart`
 - inspect latest job errors
-- verify runtime permissions for `data/` and `Download/`
+- verify runtime permissions for `docker-data/`
 
 ## Jobs fail with 0 links
 

@@ -1,0 +1,36 @@
+services:
+  webapp:
+    image: beam-benchmark-fork:latest
+    build: .
+    command: python -m uvicorn webapp.main:app --host 0.0.0.0 --port 8501
+    environment:
+      WEBAPP_HOST: 0.0.0.0
+      WEBAPP_PORT: 8501
+      SAKEY_MAX_CONCURRENT: ${SAKEY_MAX_CONCURRENT:-1}
+      PREFLIGHT_WIKIDATA_TIMEOUT: ${PREFLIGHT_WIKIDATA_TIMEOUT:-25}
+    ports:
+      - "80:8501"
+    volumes:
+      - ./docker-data:/state
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8501/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  worker:
+    image: beam-benchmark-fork:latest
+    command: python -m worker.run
+    environment:
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-2}
+      JOB_POLL_INTERVAL: ${JOB_POLL_INTERVAL:-1}
+      MAX_WORKERS_PER_JOB: ${MAX_WORKERS_PER_JOB:-8}
+      ALIGN_MAX_WORKERS: ${ALIGN_MAX_WORKERS:-8}
+      WIKIDATA_QUERY_MAX_RETRIES: ${WIKIDATA_QUERY_MAX_RETRIES:-4}
+      WIKIDATA_QUERY_RETRY_DELAY: ${WIKIDATA_QUERY_RETRY_DELAY:-2.0}
+      WIKIDATA_QUERY_TIMEOUT: ${WIKIDATA_QUERY_TIMEOUT:-300}
+    volumes:
+      - ./docker-data:/state
+    restart: unless-stopped

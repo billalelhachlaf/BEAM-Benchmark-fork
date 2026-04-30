@@ -2,7 +2,7 @@
 
 ## Step 1: Open the App
 
-- Go to `http://<host>:8501`.
+- Go to `http://<host>`.
 - Confirm dashboard loads with jobs/history blocks.
 
 ## Step 2: Fill Job Configuration

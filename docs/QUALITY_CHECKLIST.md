@@ -2,7 +2,7 @@
 
 ## 1. Fonctionnalite
 
-- [ ] Le webapp demarre et repond sur `:8501`.
+- [ ] Le webapp demarre via Docker et repond sur le port public `80`.
 - [ ] Le worker demarre et consomme les jobs.
 - [ ] Un job complet (align + build) passe sur une petite classe.
 - [ ] Les jobs annulables (`cancel`, `cancel align`, `cancel build`) fonctionnent.
@@ -12,14 +12,14 @@
 ## 2. Structure projet
 
 - [ ] Dossiers principaux documentes (`webapp`, `worker`, `scripts`, `beam`, `docs`, `tests`).
-- [ ] Les scripts d'exploitation sont dans `scripts/`.
+- [ ] L'exploitation runtime passe par Docker Compose.
 - [ ] Les fichiers runtime volumineux ne sont pas versionnes.
 - [ ] Les conventions de nommage des builds/jobs sont explicites.
 
 ## 3. Documentation admin
 
 - [ ] Guide setup/install valide sur machine vierge.
-- [ ] Guide run/restart/stop valide.
+- [ ] Guide Docker run/restart/stop valide.
 - [ ] Guide operations (logs, DB, backup) valide.
 - [ ] Guide troubleshooting couvre les erreurs frequentes.
 

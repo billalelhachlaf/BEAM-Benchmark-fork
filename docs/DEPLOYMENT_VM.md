@@ -1,7 +1,6 @@
-# Deployment On A New VM (Python Already Installed)
+# Deployment On A New VM
 
-This setup is designed for a fresh VM where Python is already present (e.g. Python 3.12.3).
-No Docker is required.
+Docker is the only supported runtime for deployment.
 
 ## 1) Clone
 
@@ -13,103 +12,64 @@ cd BEAM-App
 ## 2) Bootstrap (one command)
 
 ```bash
-bash scripts/bootstrap_vm.sh
+docker compose up -d --build
 ```
 
-Optional (with test dependencies):
-
-```bash
-bash scripts/bootstrap_vm.sh --dev
-```
-
-This will:
-- create `.venv`
-- install dependencies
-- create runtime folders (`.run`, `logs`, `Download`, `data`)
-- initialize/migrate `jobs.db`
-- create `.env` from `.env.example` if missing
-
-## 3) Start services
-
-```bash
-bash scripts/run_webapp.sh
-bash scripts/run_worker.sh
-```
-
-Alternative (recommended for public server on port 80 with auto-restart):
-
-```bash
-sudo bash scripts/setup_server_deploy.sh --server-name <server-ip-or-domain>
-```
-
-This configures:
-- `beam-webapp` (`systemd`)
-- `beam-worker` (`systemd`)
-- `nginx` reverse proxy on port `80`
-
-Useful service commands:
-
-```bash
-sudo systemctl status beam-webapp beam-worker nginx
-sudo systemctl restart beam-webapp beam-worker nginx
-sudo journalctl -u beam-webapp -u beam-worker -f
-```
+This creates the `webapp` and `worker` containers and stores runtime state in
+`docker-data/`.
 
 UI:
-- local: `http://127.0.0.1:8501`
-- remote: `http://<vm-ip>:8501`
-- public via nginx: `http://<server-ip-or-domain>`
+- local: `http://127.0.0.1`
+- remote: `http://<vm-ip>`
 
-## 4) Health check
+## 3) Health check
 
 ```bash
-bash scripts/check_health.sh
+docker compose exec webapp bash scripts/check_health.sh
 ```
 
-## 5) Stop services
+## 4) Stop services
 
 ```bash
-bash scripts/stop_all.sh
+docker compose down
 ```
 
-## 6) Reset to fresh runtime instance (keep presets)
+## 5) Reset to fresh runtime instance
 
 ```bash
-bash scripts/init_fresh_instance.sh
+docker compose down
+mkdir -p docker-data/db_backups
+cp docker-data/jobs.db docker-data/db_backups/jobs_$(date +%Y%m%d_%H%M%S).db
+rm -f docker-data/jobs.db docker-data/jobs.db-shm docker-data/jobs.db-wal
+docker compose up -d
 ```
 
 What it does:
-- backup `jobs.db` into `.run/db_backups/`
-- clear job/subjob/event history
+- backs up and recreates the job database
 - keep presets (presets are code-defined)
-- keep `Download/` and `data/` folders
+- keeps `docker-data/Download/` and `docker-data/data/`
 
-## 7) Optional tmux usage
-
-```bash
-tmux new -s beam_web 'cd ~/BEAM-App && bash scripts/run_webapp.sh'
-tmux new -s beam_worker 'cd ~/BEAM-App && bash scripts/run_worker.sh'
-```
-
-## 8) Troubleshooting
+## 6) Troubleshooting
 
 - Port busy:
 ```bash
-lsof -i :8501
-bash scripts/stop_all.sh
+sudo lsof -i :80
+docker compose down
 ```
 
 - Web not reachable:
 ```bash
-tail -n 100 logs/webapp.log
+docker compose logs --tail=100 webapp
 ```
 
 - Worker not progressing jobs:
 ```bash
-tail -n 100 logs/worker.log
+docker compose logs --tail=100 worker
 ```
 
 - DB reset needed:
 ```bash
-bash scripts/init_fresh_instance.sh
+docker compose down
+rm -f docker-data/jobs.db docker-data/jobs.db-shm docker-data/jobs.db-wal
+docker compose up -d
 ```

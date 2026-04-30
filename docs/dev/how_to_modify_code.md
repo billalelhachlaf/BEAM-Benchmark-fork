@@ -11,7 +11,6 @@
 
 ```bash
 git checkout -b feature/<short-name>
-source .venv/bin/activate
 pytest -q
 bash scripts/docs_check.sh
 ```
@@ -21,7 +20,8 @@ After changes:
 ```bash
 pytest -q
 bash scripts/docs_check.sh
-bash scripts/check_health.sh
+docker compose up -d --build
+docker compose exec webapp bash scripts/check_health.sh
 ```
 
 ## 3. Change Patterns
@@ -48,6 +48,6 @@ bash scripts/check_health.sh
 ## 4. Definition Of Done For Code Changes
 
 - Tests pass (`pytest -q`).
-- No regression in run scripts.
+- No regression in Docker startup.
 - Docs updated where behavior changed.
 - Logs/errors remain actionable.

@@ -57,7 +57,17 @@ bash scripts/stop_server.sh
 bash scripts/restart_server.sh
 ```
 
-## 6. Smoke Test Procedure
+## 6. Easy Server Deployment (port 80)
+
+For a VM/public server, use:
+
+```bash
+sudo bash scripts/setup_server_deploy.sh --server-name <server-ip-or-domain>
+```
+
+This single command bootstraps Python deps, creates `systemd` services (`beam-webapp`, `beam-worker`), and configures `nginx` on port `80`.
+
+## 7. Smoke Test Procedure
 
 1. Open dashboard.
 2. Launch a small test-class run.
@@ -65,7 +75,7 @@ bash scripts/restart_server.sh
 4. Open build detail page.
 5. Download generated build.
 
-## 7. Operational Security Basics
+## 8. Operational Security Basics
 
 - Do not expose `jobs.db` publicly.
 - Keep `Download/` and `data/` private.

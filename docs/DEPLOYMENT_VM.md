@@ -36,9 +36,29 @@ bash scripts/run_webapp.sh
 bash scripts/run_worker.sh
 ```
 
+Alternative (recommended for public server on port 80 with auto-restart):
+
+```bash
+sudo bash scripts/setup_server_deploy.sh --server-name <server-ip-or-domain>
+```
+
+This configures:
+- `beam-webapp` (`systemd`)
+- `beam-worker` (`systemd`)
+- `nginx` reverse proxy on port `80`
+
+Useful service commands:
+
+```bash
+sudo systemctl status beam-webapp beam-worker nginx
+sudo systemctl restart beam-webapp beam-worker nginx
+sudo journalctl -u beam-webapp -u beam-worker -f
+```
+
 UI:
 - local: `http://127.0.0.1:8501`
 - remote: `http://<vm-ip>:8501`
+- public via nginx: `http://<server-ip-or-domain>`
 
 ## 4) Health check
 

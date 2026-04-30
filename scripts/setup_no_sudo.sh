@@ -52,16 +52,24 @@ fi
 PY_VER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')"
 echo "[INFO] python3 detected: ${PY_VER}"
 
-if [[ ! -d .venv ]]; then
+ensure_venv() {
   echo "[INFO] creating .venv"
   if python3 -m venv .venv >/dev/null 2>&1; then
     echo "[OK] virtualenv created with python3 -m venv"
-  else
-    echo "[WARN] python3 -m venv failed (likely missing python3-venv). Falling back to user-local virtualenv."
-    python3 -m pip install --user --upgrade pip virtualenv
-    "$HOME/.local/bin/virtualenv" -p python3 .venv
-    echo "[OK] virtualenv created with ~/.local/bin/virtualenv"
+    return 0
   fi
+  echo "[WARN] python3 -m venv failed (likely missing python3-venv). Falling back to user-local virtualenv."
+  python3 -m pip install --user --upgrade pip virtualenv
+  "$HOME/.local/bin/virtualenv" -p python3 .venv
+  echo "[OK] virtualenv created with ~/.local/bin/virtualenv"
+}
+
+if [[ ! -f .venv/bin/activate ]]; then
+  if [[ -d .venv ]]; then
+    echo "[WARN] existing .venv is incomplete. Recreating it."
+    rm -rf .venv
+  fi
+  ensure_venv
 fi
 
 # shellcheck disable=SC1091

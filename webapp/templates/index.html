@@ -938,7 +938,7 @@
             <label class="parts-label">
               <span class="label-help">
                 Parts to process
-                <span class="help-tip" tabindex="0" title="Choose which class parts to scan: all, a list like 1,2,4, or a range like 1-10.">?</span>
+                <span class="help-tip" tabindex="0" title="Choose which class parts to scan (0-based): all, a list like 0,2,4, or a range like 0-10.">?</span>
               </span>
             </label>
             <label class="checkrow parts-inline-toggle">
@@ -947,7 +947,7 @@
               <span class="help-tip" tabindex="0" title="Process only parts already present in Download/ClassName and never download missing parts from WDC.">?</span>
             </label>
           </div>
-          <input id="parts-spec-input" name="parts_spec" value="{{ form.parts_spec }}" placeholder="all, 1,2,4, or 1-10" />
+          <input id="parts-spec-input" name="parts_spec" value="{{ form.parts_spec }}" placeholder="all, 0,2,4, or 0-10" />
         </div>
         </div>
         <div class="parts-controls-flags">

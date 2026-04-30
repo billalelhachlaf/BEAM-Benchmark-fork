@@ -1854,7 +1854,14 @@ def generate_benchmark(
 
                     _set_align_normalization(ignore_chars)
                     if matched_total <= 0:
-                        raise PipelineError("No WDC values matched the property mapping rules")
+                        parts_hint = ""
+                        spec_txt = str(parts_spec or "").strip().lower()
+                        if spec_txt and spec_txt != "all" and not spec_txt.startswith("0"):
+                            parts_hint = " (parts are 0-based; try part 0 or 'all')"
+                        raise PipelineError(
+                            "No WDC values matched the property mapping rules"
+                            f"{parts_hint}. Try a broader parts_spec or a different WDC pattern."
+                        )
                     if target_fetch_error and not target_fetch_any:
                         raise PipelineError("Failed to fetch target endpoint values for property mapping rules")
                     _merge_component(merged_wdc_map, merged_wikidata_map, prop_matches, prop_wdc_values_matched)

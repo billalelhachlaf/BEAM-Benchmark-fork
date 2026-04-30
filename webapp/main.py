@@ -767,7 +767,7 @@ def _parse_parts_spec_numbers(parts_spec: str):
         else:
             wanted.add(int(spec.strip()))
     except Exception:
-        return None, f"Invalid parts spec: '{parts_spec}'. Use all, 1-10, or 1,2,4."
+        return None, f"Invalid parts spec: '{parts_spec}'. Use all, 0-10, or 0,2,4."
     return sorted(wanted), None
 
 

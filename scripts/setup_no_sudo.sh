@@ -58,10 +58,14 @@ ensure_venv() {
     echo "[OK] virtualenv created with python3 -m venv"
     return 0
   fi
-  echo "[WARN] python3 -m venv failed (likely missing python3-venv). Falling back to user-local virtualenv."
-  python3 -m pip install --user --upgrade pip virtualenv
-  "$HOME/.local/bin/virtualenv" -p python3 .venv
-  echo "[OK] virtualenv created with ~/.local/bin/virtualenv"
+  echo "[WARN] python3 -m venv failed (likely missing python3-venv). Falling back to local virtualenv.pyz."
+  local vpyz="$ROOT_DIR/.run/virtualenv.pyz"
+  mkdir -p "$ROOT_DIR/.run"
+  if [[ ! -f "$vpyz" ]]; then
+    curl -fsSL https://bootstrap.pypa.io/virtualenv.pyz -o "$vpyz"
+  fi
+  python3 "$vpyz" -p python3 .venv
+  echo "[OK] virtualenv created with local virtualenv.pyz"
 }
 
 if [[ ! -f .venv/bin/activate ]]; then

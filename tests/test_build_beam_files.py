@@ -11,14 +11,14 @@ def test_transform_triple_normalizes_wikidata_uri_tokens():
         "<http://www.wikidata.org/entity/Q5>",
         lowercase=True,
     )
-    assert s == "http://www.wikidata.org/entity/q42"
-    assert p == "http://www.wikidata.org/prop/direct/p31"
-    assert o == "http://www.wikidata.org/entity/q5"
+    assert s == "<http://www.wikidata.org/entity/q42>"
+    assert p == "<http://www.wikidata.org/prop/direct/p31>"
+    assert o == "<http://www.wikidata.org/entity/q5>"
 
 
 def test_canonical_wd_entity_uri_normalizes_lowercase_ids():
-    assert build.canonical_wd_entity_uri("http://www.wikidata.org/entity/q574") == "http://www.wikidata.org/entity/Q574"
-    assert build.canonical_wd_entity_uri("http://www.wikidata.org/entity/P31") == "http://www.wikidata.org/entity/P31"
+    assert build.canonical_wd_entity_uri("http://www.wikidata.org/entity/q574") == "http://www.wikidata.org/entity/q574"
+    assert build.canonical_wd_entity_uri("http://www.wikidata.org/entity/P31") == "http://www.wikidata.org/entity/p31"
 
 
 def test_canonical_wd_link_entity_uri_accepts_wiki_or_entity_forms():
@@ -44,7 +44,7 @@ def test_write_links_outputs_wdc_iri_and_canonical_wikidata_iri(tmp_path):
         ["https://www.wikidata.org/wiki/Q64"],
         dedupe=True,
     )
-    assert out.read_text(encoding="utf-8") == "https://example.org/wdc/e1\thttp://www.wikidata.org/entity/Q64\n"
+    assert out.read_text(encoding="utf-8") == "https://example.org/wdc/e1\thttp://www.wikidata.org/entity/q64\n"
 
 
 def test_append_wdc_labels_descriptions_strips_literal_suffixes_and_matches_iris():
@@ -131,15 +131,15 @@ def test_append_labels_descriptions_enriches_wikidata_entities_and_props(monkeyp
     )
 
     def _fake_fetch(uris, endpoint, language, batch_size, sleep_s, timeout, retries, backoff):
-        assert "http://www.wikidata.org/entity/Q1" in uris
-        assert "http://www.wikidata.org/entity/Q5" in uris
-        assert "http://www.wikidata.org/entity/P31" in uris
+        assert "http://www.wikidata.org/entity/q1" in uris
+        assert "http://www.wikidata.org/entity/q5" in uris
+        assert "http://www.wikidata.org/entity/p31" in uris
         return [
-            ("http://www.wikidata.org/entity/Q1", "http://www.w3.org/2000/01/rdf-schema#label", "\"Entity 1\""),
-            ("http://www.wikidata.org/entity/Q1", "http://schema.org/description", "\"Entity one desc\""),
-            ("http://www.wikidata.org/entity/Q5", "http://www.w3.org/2000/01/rdf-schema#label", "\"human\""),
-            ("http://www.wikidata.org/entity/P31", "http://www.w3.org/2000/01/rdf-schema#label", "\"instance of\""),
-            ("http://www.wikidata.org/entity/P31", "http://schema.org/description", "\"property desc\""),
+            ("http://www.wikidata.org/entity/q1", "http://www.w3.org/2000/01/rdf-schema#label", "\"Entity 1\""),
+            ("http://www.wikidata.org/entity/q1", "http://schema.org/description", "\"Entity one desc\""),
+            ("http://www.wikidata.org/entity/q5", "http://www.w3.org/2000/01/rdf-schema#label", "\"human\""),
+            ("http://www.wikidata.org/entity/p31", "http://www.w3.org/2000/01/rdf-schema#label", "\"instance of\""),
+            ("http://www.wikidata.org/entity/p31", "http://schema.org/description", "\"property desc\""),
         ]
 
     monkeypatch.setattr(build, "fetch_wd_labels_descriptions", _fake_fetch)
@@ -158,11 +158,11 @@ def test_append_labels_descriptions_enriches_wikidata_entities_and_props(monkeyp
     )
     content = attr_path.read_text(encoding="utf-8")
 
-    assert "http://www.wikidata.org/entity/q1\thttp://www.w3.org/2000/01/rdf-schema#label\t\"Entity 1\"" in content
-    assert "http://www.wikidata.org/entity/q1\thttp://schema.org/description\t\"Entity one desc\"" in content
-    assert "http://www.wikidata.org/entity/q5\thttp://www.w3.org/2000/01/rdf-schema#label\t\"human\"" in content
-    assert "http://www.wikidata.org/prop/direct/p31\thttp://www.w3.org/2000/01/rdf-schema#label\t\"instance of\"" in content
-    assert "http://www.wikidata.org/prop/direct/p31\thttp://schema.org/description\t\"property desc\"" in content
+    assert "<http://www.wikidata.org/entity/q1>\t<http://www.w3.org/2000/01/rdf-schema#label>\t\"Entity 1\"" in content
+    assert "<http://www.wikidata.org/entity/q1>\t<http://schema.org/description>\t\"Entity one desc\"" in content
+    assert "<http://www.wikidata.org/entity/q5>\t<http://www.w3.org/2000/01/rdf-schema#label>\t\"human\"" in content
+    assert "<http://www.wikidata.org/prop/direct/p31>\t<http://www.w3.org/2000/01/rdf-schema#label>\t\"instance of\"" in content
+    assert "<http://www.wikidata.org/prop/direct/p31>\t<http://schema.org/description>\t\"property desc\"" in content
 
 
 def test_write_prop_stats_resolves_wikidata_prop_labels_with_bracketed_preds(monkeypatch):
@@ -182,7 +182,7 @@ def test_write_prop_stats_resolves_wikidata_prop_labels_with_bracketed_preds(mon
         build,
         "fetch_wd_label_desc_map",
         lambda uris, endpoint, language, batch_size, sleep_s, timeout, retries, backoff: {
-            "http://www.wikidata.org/entity/P31": {"label": "instance of", "desc": "class membership"}
+            "http://www.wikidata.org/entity/p31": {"label": "instance of", "desc": "class membership"}
         },
     )
 

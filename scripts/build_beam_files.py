@@ -344,10 +344,25 @@ def normalize_wd_uri(value, lowercase):
         if m:
             pid = m.group(2).lower() if lowercase else m.group(2).upper()
             return f"http://www.wikidata.org/{m.group(1)}{pid}"
-        # Canonical entity URI with caller-controlled case policy.
-        ent = canonical_wd_link_entity_uri(text, lowercase=lowercase)
+        # Canonical entity URI with enforced lowercase q/p identifiers.
+        ent = canonical_wd_link_entity_uri(text, lowercase=True)
         if ent != text.strip("<>"):
             return ent
+    return text
+
+
+def _format_iri_or_term(value):
+    text = (value or "").strip()
+    if not text:
+        return text
+    if text.startswith('"'):
+        return text
+    if text.startswith("_:"):
+        return text
+    if text.startswith("<") and text.endswith(">"):
+        return text
+    if text.startswith("http://") or text.startswith("https://"):
+        return f"<{text}>"
     return text
 
 
@@ -356,6 +371,9 @@ def transform_triple(s, p, o, lowercase):
     p = normalize_wd_uri(p, lowercase)
     if not o.startswith('"'):
         o = normalize_wd_uri(o, lowercase)
+    s = _format_iri_or_term(s)
+    p = _format_iri_or_term(p)
+    o = _format_iri_or_term(o) if not o.startswith('"') else o
     return s, p, o
 
 
@@ -365,7 +383,7 @@ def write_links(path, wdc_entities, wd_entities, dedupe):
     with open(path, "w", encoding="utf-8") as out:
         for wdc, wd in zip(wdc_entities, wd_entities):
             wdc = wdc.strip().strip("<>")
-            wd = canonical_wd_link_entity_uri(wd)
+            wd = canonical_wd_link_entity_uri(wd, lowercase=True)
             if not wdc or not wd:
                 continue
             if not is_allowed_wdc_subject(wdc):
@@ -738,7 +756,7 @@ def canonical_wd_entity_uri(uri):
         return uri
     match = re.match(r"^https?://www\.wikidata\.org/entity/([pqPQ]\d+)$", uri)
     if match:
-        return f"http://www.wikidata.org/entity/{match.group(1).upper()}"
+        return f"http://www.wikidata.org/entity/{match.group(1).lower()}"
     return uri
 
 

@@ -1,4 +1,4 @@
-# User Tutorial (Current UI)
+# User Tutorial (SaaS UI)
 
 Updated: 2026-05-11  
 Audience: benchmark users (no code changes required)
@@ -6,7 +6,12 @@ Audience: benchmark users (no code changes required)
 ## 1. Open the App
 
 - Open `http://<host>:8501`.
-- From the dashboard top bar, open `/tutorial` if you want side-by-side guidance.
+- Use the top navigation bar available on all main pages.
+- Core pages:
+  - `/app/create` for configuration and launch
+  - `/app/jobs` for live monitoring
+  - `/app/history` for completed builds
+  - `/tutorial` for guidance
 
 ## 2. Before You Run (30-second checklist)
 
@@ -15,41 +20,55 @@ Audience: benchmark users (no code changes required)
 - Set `Matching mode` and matching fields consistently.
 - Keep `Target endpoint` = `Wikidata` for first validation.
 
-## 3. Fill Job Configuration
+## 3. Create Run Wizard
 
-### Matching mode
+The Create page is step-based:
+- `1. Scope`
+- `2. Mapping`
+- `3. Endpoint`
+- `4. Parts`
+- `5. Validation`
+
+Use `Next`/`Previous`. The wizard blocks progression when required fields are missing.
+
+### 1) Scope
 - `property`: align by value matching between WDC and endpoint properties.
 - `sameas`: align through explicit resource links.
 - `sameas_or_property`: union of both strategies.
-
-### Class scope
 - `Class name`: WDC class to process (for example `Movie`, `City`, `Language`).
 - `Target class filter`: optional semantic constraint (QID for Wikidata, class URI/prefix for other endpoints).
 
-### Property mapping
+### 2) Mapping
 - `Pattern search scope`: where WDC pattern tokens are searched (`predicate` or `value`).
 - `Property mapping rules`: one rule per row, format:
   - `wdc_prop => target_prop`
   - target alternatives allowed (example: `P212|P957`)
 - Per-row normalization can be configured from the mapping UI controls.
 
-### Endpoint and execution controls
+### 3) Endpoint
 - `Target endpoint`: `wikidata`, `dbpedia`, `yago`, or `custom`.
 - `Custom endpoint URL`: required only when endpoint is `custom`.
 - `Custom prefixes`: optional SPARQL prefixes.
+
+### 4) Parts and execution controls
 - `Parts to process`: `all`, `0,2,4`, or `0-10`.
 - `Use local parts only`: never download missing WDC parts.
 - `Ignore align cache`: force a fresh align run.
 
+### 5) Validation and launch
+- Check readiness warnings in the validation step.
+- Run preflight before launch when possible.
+- Click `Generate benchmark`.
+
 ## 4. Launch and Monitor
 
-- Click `Generate benchmark`.
 - Expected job flow: `queued -> running -> done`.
-- Track subjobs and logs from history/build details.
+- Use `/app/jobs` to track status, subjobs, and logs.
+- Use action buttons (`cancel`, `rerun`, `rerun align/build`) when needed.
 
 ## 5. Validate Outputs Quickly
 
-In completed build artifacts, verify:
+In `/app/history`, open a completed build and verify:
 - `ent_links` exists and is non-empty,
 - `attr_triples_*` and `rel_triples_*` exist,
 - `stats.json` and `BUILD_CONFIG.json` are present.

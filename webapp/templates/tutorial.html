@@ -20,6 +20,13 @@
     ul,ol{padding-left:20px}
     .toc ul{margin:8px 0}
     .warn{border:1px solid #7f1d1d;background:#2a0f10;color:#ffd6d6;border-radius:8px;padding:10px}
+    .tutorial-layout{display:grid;grid-template-columns:280px 1fr;gap:12px;align-items:start}
+    .tutorial-sidebar{position:sticky;top:12px}
+    .tutorial-content .card{margin-bottom:12px}
+    @media (max-width: 980px){
+      .tutorial-layout{grid-template-columns:1fr}
+      .tutorial-sidebar{position:static}
+    }
   </style>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -38,23 +45,29 @@
       <div class="small">Source: <code>{{ tutorial_source_path }}</code></div>
     </div>
 
-    {% if tutorial_ok and tutorial_sections %}
-    <div class="card toc">
-      <h2>Contents</h2>
-      <ul>
-        {% for s in tutorial_sections %}
-        <li><a href="#{{ s.anchor }}">{{ s.title }}</a></li>
-        {% endfor %}
-      </ul>
-    </div>
-    {% endif %}
+    <div class="tutorial-layout">
+      <aside class="tutorial-sidebar">
+        {% if tutorial_ok and tutorial_sections %}
+        <div class="card toc">
+          <h2>Contents</h2>
+          <ul>
+            {% for s in tutorial_sections %}
+            <li><a href="#{{ s.anchor }}">{{ s.title }}</a></li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+      </aside>
 
-    <div class="card">
-      {% if not tutorial_ok %}
-      <div class="warn">{{ tutorial_error }}</div>
-      {% else %}
-      {{ tutorial_html|safe }}
-      {% endif %}
+      <main class="tutorial-content">
+        <div class="card">
+          {% if not tutorial_ok %}
+          <div class="warn">{{ tutorial_error }}</div>
+          {% else %}
+          {{ tutorial_html|safe }}
+          {% endif %}
+        </div>
+      </main>
     </div>
   </div>
 </body>

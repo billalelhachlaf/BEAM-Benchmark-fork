@@ -19,6 +19,12 @@ Open:
 - `http://localhost:8501`
 - or `http://<server-ip-or-domain>:8501`
 
+Main UI routes:
+- `http://<host>:8501/app/create` (Create Run wizard)
+- `http://<host>:8501/app/jobs` (active/queued/running jobs)
+- `http://<host>:8501/app/history` (completed builds and actions)
+- `http://<host>:8501/tutorial` (in-app tutorial)
+
 Stop:
 
 ```bash
@@ -38,15 +44,28 @@ Expected:
 - root HTTP endpoint responds
 
 ## First Successful Run (UI)
-1. Open `http://localhost:8501`.
-2. Choose an example preset or fill the form manually.
-3. Set `Matching mode` to `property` for a first run.
-4. Select a valid `Class name`.
-5. Start with a small `Parts to process` value (for example `0-2`).
-6. Fill at least one `Property mapping rules` row.
-7. Keep `Target endpoint` = `wikidata` for first validation.
-8. Run `Generate benchmark`.
-9. Confirm status flow: `queued -> running -> done`.
+1. Open `http://localhost:8501/app/create`.
+2. Use the wizard steps (`Scope -> Mapping -> Endpoint -> Parts -> Validation`).
+3. For a first run: `Matching mode=property`, valid `Class name`, `Parts=0-2`, and at least one mapping rule.
+4. Keep `Target endpoint=wikidata`.
+5. Run `Preflight` then `Generate benchmark`.
+6. Follow runtime status in `http://localhost:8501/app/jobs`.
+7. Retrieve completed outputs in `http://localhost:8501/app/history`.
+8. Confirm status flow: `queued -> running -> done`.
+
+## Dev Mode (Hot Reload, no rebuild per code change)
+
+The default compose setup supports hot reload for `webapp`:
+- bind mount: `./:/app`
+- server command: `uvicorn ... --reload`
+
+Start/restart:
+
+```bash
+docker compose up -d webapp
+```
+
+Then edit code on host and refresh browser (no image rebuild needed for UI/Python changes).
 
 ## Fast Troubleshooting
 
@@ -94,3 +113,12 @@ Global index:
 - `beam/pipeline.py`: orchestration and error handling
 - `scripts/align.py`: matching and endpoint querying
 - `scripts/build_beam_files.py`: BEAM artifact generation
+
+## UI Design Guardrails (Uncodixfy)
+
+The project now includes Uncodixfy guidelines to avoid generic AI-generated UI patterns when editing frontend templates/styles.
+
+- Ruleset: [docs/uncodixfy/Uncodixfy.md](docs/uncodixfy/Uncodixfy.md)
+- Skill format: [docs/uncodixfy/SKILL.md](docs/uncodixfy/SKILL.md)
+- Upstream reference: [docs/uncodixfy/README_UPSTREAM.md](docs/uncodixfy/README_UPSTREAM.md)
+- License: [docs/uncodixfy/LICENSE](docs/uncodixfy/LICENSE)

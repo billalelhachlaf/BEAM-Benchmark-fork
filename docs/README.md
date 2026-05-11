@@ -8,6 +8,7 @@ This documentation is organized by audience and depth.
 - In-app onboarding: open `/tutorial` from the dashboard top bar
 - Project structure and boundaries: [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)
 - Quality checklist: [QUALITY_CHECKLIST.md](QUALITY_CHECKLIST.md)
+- Documentation style guide: [DOC_STYLE.md](DOC_STYLE.md)
 - Audit template: [AUDIT_TEMPLATE.md](AUDIT_TEMPLATE.md)
 
 ## 2. Admin Documentation

@@ -1,78 +1,80 @@
-# User Tutorial (Detailed)
+# User Tutorial (Current UI)
 
-## Step 1: Open the App
+Updated: 2026-05-11  
+Audience: benchmark users (no code changes required)
 
-- Go to `http://<host>`.
-- Confirm dashboard loads with jobs/history blocks.
-- Open `/tutorial` from the top bar for in-app guidance while you configure.
+## 1. Open the App
 
-## Step 2: Fill Job Configuration
+- Open `http://<host>:8501`.
+- From the dashboard top bar, open `/tutorial` if you want side-by-side guidance.
 
-Main fields:
-- `Class name`: WDC class (e.g. `Movie`, `City`, `Language`).
-- `Parts spec`: `all`, `1,2,3`, or `1-5`.
-- `WDC predicate pattern`: source property hint (`name`, `sameAs`, `eidr`, ...).
-- `Wikidata property`: target mapping (`Pxxxx`, `wdt:Pxxxx`, or `rdfs:label`).
-- `Wikidata class (QID)`: optional semantic filter.
-- `Max depth`: traversal depth through blank nodes.
-- `WDC values are Wikidata URLs`: direct-link mode toggle.
-- `Ignore align cache`: force fresh alignment.
-- `Use local parts only`: disable downloads for missing parts.
+## 2. Before You Run (30-second checklist)
 
-Rule reminders:
-- if URL mode is OFF, Wikidata property is required.
-- if URL mode is ON, Wikidata class is required.
+- Choose a valid `Class name`.
+- Start with a small `Parts to process` value (`0-2` or `0-5`).
+- Set `Matching mode` and matching fields consistently.
+- Keep `Target endpoint` = `Wikidata` for first validation.
 
-## Step 3: Launch Job
+## 3. Fill Job Configuration
+
+### Matching mode
+- `property`: align by value matching between WDC and endpoint properties.
+- `sameas`: align through explicit resource links.
+- `sameas_or_property`: union of both strategies.
+
+### Class scope
+- `Class name`: WDC class to process (for example `Movie`, `City`, `Language`).
+- `Target class filter`: optional semantic constraint (QID for Wikidata, class URI/prefix for other endpoints).
+
+### Property mapping
+- `Pattern search scope`: where WDC pattern tokens are searched (`predicate` or `value`).
+- `Property mapping rules`: one rule per row, format:
+  - `wdc_prop => target_prop`
+  - target alternatives allowed (example: `P212|P957`)
+- Per-row normalization can be configured from the mapping UI controls.
+
+### Endpoint and execution controls
+- `Target endpoint`: `wikidata`, `dbpedia`, `yago`, or `custom`.
+- `Custom endpoint URL`: required only when endpoint is `custom`.
+- `Custom prefixes`: optional SPARQL prefixes.
+- `Parts to process`: `all`, `0,2,4`, or `0-10`.
+- `Use local parts only`: never download missing WDC parts.
+- `Ignore align cache`: force a fresh align run.
+
+## 4. Launch and Monitor
 
 - Click `Generate benchmark`.
-- Job appears with status `queued`.
-- Worker transitions it to `running`.
+- Expected job flow: `queued -> running -> done`.
+- Track subjobs and logs from history/build details.
 
-## Step 4: Monitor Execution
+## 5. Validate Outputs Quickly
 
-- Watch subjobs (`align`, `build`).
-- Open live logs for details.
-- If needed, cancel and rerun with adjusted parameters.
+In completed build artifacts, verify:
+- `ent_links` exists and is non-empty,
+- `attr_triples_*` and `rel_triples_*` exist,
+- `stats.json` and `BUILD_CONFIG.json` are present.
 
-## Step 5: Inspect Completed Build
-
-Open build detail and verify:
-- links count,
-- build metadata,
-- output directories (`with_link_code`, `without_link_code`).
-
-## Step 6: Download Output
-
-Use download action from build page.
-
-Typical files:
-- `ent_links`
-- `attr_triples_1`, `rel_triples_1`
-- `attr_triples_2`, `rel_triples_2`
-- property stats files
-
-## Step 7: Iterate for Better Quality
-
-- Start with small `parts_spec`.
-- Validate matching behavior quickly.
-- Scale to `all` only after good signal.
-
-## Quick Recovery Patterns
+## 6. Recovery Patterns
 
 If job stays `queued`:
-- Ask admin to check worker logs: `docker compose logs --tail=300 worker`.
 
-If job fails during download/align:
-- Retry same config once (transient network issues are common).
-- If failure persists, reduce `parts_spec` and rerun.
+```bash
+docker compose logs --tail=300 worker
+```
+
+If align/download fails:
+- rerun once (transient endpoint/network failures are common),
+- reduce `Parts to process`,
+- retry with same config.
 
 If job ends with `0 links`:
-- Recheck `WDC predicate pattern` and property mapping.
-- Try broader pattern and rerun align without cache.
+- verify `Property mapping rules` syntax,
+- try the other `Pattern search scope`,
+- relax or remove `Target class filter`,
+- rerun with `Ignore align cache`.
 
-## Optional: SAKEY Explorer
+## 7. Next Steps
 
-- Open SAKEY page from dashboard.
-- Explore key candidates for property strategy refinement.
-- Treat as assistive analysis, not automatic pipeline mutation.
+- Optimization recipes: [recipes.md](recipes.md)
+- Result interpretation: [results_interpretation.md](results_interpretation.md)
+- FAQ: [faq.md](faq.md)

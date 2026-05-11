@@ -2,7 +2,7 @@
 
 ## 1. Fonctionnalite
 
-- [ ] Le webapp demarre via Docker et repond sur le port public `80`.
+- [ ] Le webapp demarre via Docker et repond sur le port public `8501`.
 - [ ] Le worker demarre et consomme les jobs.
 - [ ] Un job complet (align + build) passe sur une petite classe.
 - [ ] Les jobs annulables (`cancel`, `cancel align`, `cancel build`) fonctionnent.

@@ -9,7 +9,7 @@ services:
       SAKEY_MAX_CONCURRENT: ${SAKEY_MAX_CONCURRENT:-1}
       PREFLIGHT_WIKIDATA_TIMEOUT: ${PREFLIGHT_WIKIDATA_TIMEOUT:-25}
     ports:
-      - "80:8501"
+      - "8501:8501"
     volumes:
       - ./docker-data:/state
     healthcheck:

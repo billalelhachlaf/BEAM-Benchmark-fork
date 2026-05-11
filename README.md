@@ -113,7 +113,47 @@ flowchart TD
     A <-->|artifact browsing| H
 ```
 
-### 5.3 What happens at runtime
+### 5.3 Visual processing pipeline (algorithms on dummy data)
+
+```mermaid
+flowchart TD
+    A[Dummy WDC triples<br/>m1 eidr 10.5240/AAAA-BBBB-CCCC-DDDD-EEEE-C<br/>m2 eidr 10 5240 AAAA BBBB CCCC DDDD EEEE C<br/>m3 eidr 10.5240/ZZZZ-YYYY-XXXX-WWWW-VVVV-U] --> B[Extract keys by predicate pattern<br/>eidr]
+    B --> C[Normalize keys<br/>remove spaces,dots,dashes; lowercase]
+    C --> D[Fetch target candidates<br/>wdt:P2704 on Wikidata]
+    D --> E[Exact key match<br/>normalized WDC key == normalized WD key]
+    E --> F[Strict duplicate-key filter<br/>keep richest WDC entity per key]
+    F --> G[Write ent_links]
+    G --> H[Build split<br/>attr_triples_* and rel_triples_*]
+```
+
+Dummy data walkthrough:
+- Source keys before normalization:
+  - `m1`: `10.5240/AAAA-BBBB-CCCC-DDDD-EEEE-C`
+  - `m2`: `10 5240 AAAA BBBB CCCC DDDD EEEE C`
+  - `m3`: `10.5240/ZZZZ-YYYY-XXXX-WWWW-VVVV-U`
+- After normalization (`ignore_chars=spaces;-;.` + lowercase):
+  - `m1` -> `105240/aaaabbbbccccddddeeeec`
+  - `m2` -> `105240/aaaabbbbccccddddeeeec`
+  - `m3` -> `105240/zzzzyyyyxxxxwwwwvvvvu`
+- Candidate matches from target:
+  - `105240/aaaabbbbccccddddeeeec` -> `wd:Q111`
+  - `105240/zzzzyyyyxxxxwwwwvvvvu` -> `wd:Q222`
+- Duplicate-key resolution:
+  - `m1` and `m2` share same key; strict filter keeps only one (richest record).
+- Final links written:
+
+```text
+<m1> <wd:Q111>
+<m3> <wd:Q222>
+```
+
+Algorithm-to-output mapping:
+- key extraction + normalization + matching + dedup -> `ent_links`
+- WDC graph split after links -> `attr_triples_1`, `rel_triples_1`
+- target-side expansion -> `attr_triples_2`, `rel_triples_2`
+- aggregate counters -> `stats.json`
+
+### 5.4 What happens at runtime
 
 1. UI posts your form config.
 2. Config is stored as a job in `jobs.db` with status `queued`.
@@ -125,7 +165,7 @@ flowchart TD
 5. Build stage writes benchmark artifacts under `data/<ClassName>/beam_<timestamp>/`.
 6. Job ends in `done` or `error`; UI shows subjob states, logs, and output paths.
 
-### 5.4 Happy-path sample (what success looks like)
+### 5.5 Happy-path sample (what success looks like)
 
 Status flow in UI:
 - `queued -> running -> done`
@@ -171,7 +211,7 @@ How to read them quickly:
 - `stats.json`: aggregate counts/metrics for sanity checks.
 - `BUILD_CONFIG.json`: exact parameters used for reproducibility.
 
-### 5.5 Failure sample + recovery (fast debug path)
+### 5.6 Failure sample + recovery (fast debug path)
 
 Example failure:
 - UI job ends `error` during `align`.

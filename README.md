@@ -13,7 +13,7 @@ It is designed to let you:
 - [2) Prerequisites](#2-prerequisites)
 - [3) Quick Start (Docker)](#3-quick-start-docker)
 - [4) Health Check + First Successful Run](#4-health-check--first-successful-run)
-- [5) How It Works (End-to-End)](#5-how-it-works-end-to-end)
+- [5) Pipeline Walkthrough (Visual + Concrete)](#5-pipeline-walkthrough-visual--concrete)
 - [6) Repository Map](#6-repository-map)
 - [7) How to Modify Safely](#7-how-to-modify-safely)
 - [8) Common Failures and Fixes](#8-common-failures-and-fixes)
@@ -81,22 +81,117 @@ First successful run (UI):
 4. Confirm status flow: `queued -> running -> done`.
 5. Confirm build artifacts are created under `data/...`.
 
-## 5) How It Works (End-to-End)
+## 5) Pipeline Walkthrough (Visual + Concrete)
 
-Flow:
-1. UI/API (`webapp/main.py`) receives job config.
-2. Job is written to `jobs.db`.
-3. Worker (`worker/run.py`) polls and executes queued jobs.
-4. Pipeline (`beam/pipeline.py`) orchestrates align + build.
-5. Align (`scripts/align.py`) extracts/matches WDC values to target endpoint values.
-6. Build (`scripts/build_beam_files.py`) writes BEAM output files.
-7. UI reads status/events/logs and exposes downloadable artifacts.
+### 5.1 Input: a real job config
 
-Runtime state and artifacts:
-- `Download/<ClassName>/`: WDC parts + align cache
-- `data/<ClassName>/beam_<timestamp>/`: generated outputs
-- `jobs.db`: queue, subjobs, events
-- `logs/`: runtime logs
+Typical UI configuration for a first run:
+- `Matching mode`: `property`
+- `Class name`: `Movie`
+- `Pattern search scope`: `predicate`
+- `WDC pattern`: `eidr`
+- `Property mapping rules`: `eidr => wdt:P2704`
+- `Target endpoint`: `wikidata`
+- `Target class filter`: `Q11424`
+- `Parts to process`: `1-3` (small first run)
+
+This means: extract WDC values from predicates matching `eidr`, then align them against Wikidata property `P2704` (EIDR) for entities in class `Q11424` (film).
+
+### 5.2 Visual pipeline
+
+```mermaid
+flowchart TD
+    A[Web UI / API<br/>webapp/main.py] -->|submit config| B[(jobs.db)]
+    B -->|queued job| C[Worker loop<br/>worker/run.py]
+    C --> D[Pipeline orchestrator<br/>beam/pipeline.py]
+    D --> E[Align stage<br/>scripts/align.py]
+    E --> F[Build stage<br/>scripts/build_beam_files.py]
+    E --> G[Download/ClassName<br/>WDC parts + align cache]
+    F --> H[data/ClassName/beam_timestamp<br/>BEAM artifacts]
+    D --> I[logs/*.log + subjob events]
+    A <-->|status + logs + history| B
+    A <-->|artifact browsing| H
+```
+
+### 5.3 What happens at runtime
+
+1. UI posts your form config.
+2. Config is stored as a job in `jobs.db` with status `queued`.
+3. Worker picks it, marks `running`, and executes the pipeline.
+4. Align stage:
+   - ensures class parts exist in `Download/<ClassName>/` (download/decompress if missing),
+   - extracts candidate values from WDC quads,
+   - resolves target-side candidates via endpoint queries.
+5. Build stage writes benchmark artifacts under `data/<ClassName>/beam_<timestamp>/`.
+6. Job ends in `done` or `error`; UI shows subjob states, logs, and output paths.
+
+### 5.4 Happy-path sample (what success looks like)
+
+Status flow in UI:
+- `queued -> running -> done`
+- subjobs: `align: done`, `build: done`
+
+Output tree sample:
+
+```text
+data/Movie/beam_20260511_104512/
+  ent_links
+  attr_triples_1
+  rel_triples_1
+  fold_0/
+  fold_1/
+  stats.json
+  BUILD_CONFIG.json
+```
+
+Sample content snippets:
+
+```text
+# ent_links
+<wdc_entity_iri_1> <wd:Q12345>
+<wdc_entity_iri_2> <wd:Q67890>
+```
+
+```text
+# attr_triples_1
+<wdc_entity_iri_1> <attr_name> "Example Title"
+<wdc_entity_iri_1> <attr_datePublished> "2019-01-01"
+```
+
+```text
+# rel_triples_1
+<wdc_entity_iri_1> <rel_director> <wdc_entity_iri_55>
+<wdc_entity_iri_1> <rel_actor> <wdc_entity_iri_77>
+```
+
+How to read them quickly:
+- `ent_links`: final aligned pairs (source entity -> target entity).
+- `attr_triples_*`: literal attributes used for benchmark features.
+- `rel_triples_*`: relation edges between entities.
+- `stats.json`: aggregate counts/metrics for sanity checks.
+- `BUILD_CONFIG.json`: exact parameters used for reproducibility.
+
+### 5.5 Failure sample + recovery (fast debug path)
+
+Example failure:
+- UI job ends `error` during `align`.
+- Message pattern: missing parts, connection refused, incomplete download, or zero matches.
+
+Check sequence:
+
+```bash
+docker compose logs --tail=300 worker
+docker compose exec webapp bash scripts/check_health.sh
+du -sh Download data
+```
+
+Common causes and next action:
+- Network interruption while downloading WDC parts:
+  - rerun job with same config (download resumes from existing local state when possible).
+- `No WDC values matched the property mapping rules`:
+  - broaden pattern scope (`predicate` vs `value`) or adjust mapping rule/property.
+- Job stuck `queued`:
+  - verify worker is alive (`docker compose ps`, worker logs).
 
 ## 6) Repository Map
 
@@ -178,5 +273,5 @@ docker compose exec webapp bash scripts/check_health.sh
 - User tutorial: [docs/user/tutorial.md](docs/user/tutorial.md)
 - Limits and caveats: [docs/limits.md](docs/limits.md)
 
-In-app help page:
-- `/help`
+In-app tutorial page:
+- `/tutorial`

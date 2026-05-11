@@ -35,6 +35,20 @@ docker compose up -d --build
 docker compose exec webapp bash scripts/check_health.sh
 ```
 
+## Post-deploy Functional Check (Tutorial-Centered)
+
+After each deploy, validate user guidance path:
+1. Open `/` and confirm dashboard renders.
+2. Open `/tutorial` and confirm content loads (not fallback error).
+3. Confirm tutorial links/anchors are visible.
+4. Launch one small job and verify status changes `queued -> running`.
+
+Quick HTTP probe from host:
+
+```bash
+curl -I http://127.0.0.1:8501/tutorial
+```
+
 ## Database Quick Inspection
 
 ```bash

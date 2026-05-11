@@ -4,6 +4,7 @@
 
 - Go to `http://<host>`.
 - Confirm dashboard loads with jobs/history blocks.
+- Open `/tutorial` from the top bar for in-app guidance while you configure.
 
 ## Step 2: Fill Job Configuration
 
@@ -56,6 +57,19 @@ Typical files:
 - Start with small `parts_spec`.
 - Validate matching behavior quickly.
 - Scale to `all` only after good signal.
+
+## Quick Recovery Patterns
+
+If job stays `queued`:
+- Ask admin to check worker logs: `docker compose logs --tail=300 worker`.
+
+If job fails during download/align:
+- Retry same config once (transient network issues are common).
+- If failure persists, reduce `parts_spec` and rerun.
+
+If job ends with `0 links`:
+- Recheck `WDC predicate pattern` and property mapping.
+- Try broader pattern and rerun align without cache.
 
 ## Optional: SAKEY Explorer
 

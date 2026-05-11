@@ -59,3 +59,28 @@ Checks:
 - `SAKEY` runner availability
 - resource pressure (RAM/CPU)
 - run artifacts and logs under data runtime paths
+
+## Tutorial page unavailable or incomplete
+
+Symptoms:
+- `/tutorial` returns non-200
+- Tutorial page shows source-not-found fallback
+- Tutorial opens but content is empty
+
+Checks:
+
+```bash
+docker compose ps
+docker compose exec webapp bash scripts/check_health.sh
+docker compose logs --tail=200 webapp
+```
+
+Likely causes:
+- webapp container restarted with stale/missing docs mount
+- docs path mismatch for tutorial source file
+- image built from outdated branch/revision
+
+Actions:
+- verify `docs/user/tutorial.md` exists in deployed workspace/image
+- redeploy current branch: `docker compose up -d --build`
+- recheck `/tutorial` and dashboard tutorial link

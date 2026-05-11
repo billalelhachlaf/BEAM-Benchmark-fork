@@ -3,6 +3,7 @@ import os
 import shutil
 import tempfile
 import time
+import html
 import zipfile
 import asyncio
 import difflib
@@ -22,6 +23,7 @@ from bs4 import BeautifulSoup
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Form, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from beam import db
@@ -29,8 +31,10 @@ from beam.wdc_classes import fetch_wdc_classes, load_wdc_classes_catalog, save_w
 from scripts import align as align_script
 
 app = FastAPI()
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+TUTORIAL_MD_PATH = Path("docs") / "user" / "tutorial.md"
 
 WDC_PARTS_BASE_URL = "https://data.dws.informatik.uni-mannheim.de/structureddata/2024-12/quads/classspecific/"
 _PART_HREF_RE = re.compile(r"^part_(\d+)\.gz$", re.IGNORECASE)
@@ -232,6 +236,113 @@ def _default_form():
 
 def _clean_text(value: Optional[str]) -> str:
     return (value or "").strip()
+
+
+def _slugify_heading(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-")
+    return slug or "section"
+
+
+def _render_markdown_basic(md_text: str):
+    lines = (md_text or "").splitlines()
+    out = []
+    sections = []
+    in_code = False
+    list_mode = None
+
+    def _close_list():
+        nonlocal list_mode
+        if list_mode == "ul":
+            out.append("</ul>")
+        elif list_mode == "ol":
+            out.append("</ol>")
+        list_mode = None
+
+    for raw in lines:
+        line = raw.rstrip("\n")
+        stripped = line.strip()
+
+        if stripped.startswith("```"):
+            _close_list()
+            if not in_code:
+                out.append("<pre><code>")
+                in_code = True
+            else:
+                out.append("</code></pre>")
+                in_code = False
+            continue
+
+        if in_code:
+            out.append(html.escape(line))
+            continue
+
+        if not stripped:
+            _close_list()
+            continue
+
+        h = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+        if h:
+            _close_list()
+            lvl = len(h.group(1))
+            title = h.group(2).strip()
+            anchor = _slugify_heading(title)
+            if lvl <= 3:
+                sections.append({"title": title, "anchor": anchor, "level": lvl})
+            out.append(f'<h{lvl} id="{anchor}">{html.escape(title)}</h{lvl}>')
+            continue
+
+        ul = re.match(r"^[-*]\s+(.+)$", stripped)
+        if ul:
+            if list_mode != "ul":
+                _close_list()
+                out.append("<ul>")
+                list_mode = "ul"
+            item = html.escape(ul.group(1).strip())
+            item = re.sub(r"`([^`]+)`", r"<code>\1</code>", item)
+            out.append(f"<li>{item}</li>")
+            continue
+
+        ol = re.match(r"^\d+\.\s+(.+)$", stripped)
+        if ol:
+            if list_mode != "ol":
+                _close_list()
+                out.append("<ol>")
+                list_mode = "ol"
+            item = html.escape(ol.group(1).strip())
+            item = re.sub(r"`([^`]+)`", r"<code>\1</code>", item)
+            out.append(f"<li>{item}</li>")
+            continue
+
+        _close_list()
+        para = html.escape(stripped)
+        para = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2" target="_blank" rel="noopener">\1</a>', para)
+        para = re.sub(r"`([^`]+)`", r"<code>\1</code>", para)
+        out.append(f"<p>{para}</p>")
+
+    _close_list()
+    if in_code:
+        out.append("</code></pre>")
+    return "\n".join(out), sections
+
+
+def _load_tutorial_page_data():
+    if not TUTORIAL_MD_PATH.exists():
+        return {
+            "ok": False,
+            "error": f"Tutorial source not found: {TUTORIAL_MD_PATH}",
+            "html": "",
+            "sections": [],
+            "source_path": str(TUTORIAL_MD_PATH),
+        }
+    text = TUTORIAL_MD_PATH.read_text(encoding="utf-8", errors="replace")
+    rendered, sections = _render_markdown_basic(text)
+    return {
+        "ok": True,
+        "error": "",
+        "html": rendered,
+        "sections": sections,
+        "source_path": str(TUTORIAL_MD_PATH),
+    }
 
 
 def _normalize_target_endpoint(value: Optional[str]) -> str:
@@ -4300,9 +4411,9 @@ def _init_db():
     db.init_db()
 
 
-@app.get("/", response_class=HTMLResponse)
-def index(
+def _render_index_page(
     request: Request,
+    app_view: str = "create",
     preset: Optional[str] = None,
     recent: Optional[int] = None,
     form_error: Optional[str] = None,
@@ -4364,6 +4475,7 @@ def index(
         request,
         "index.html",
         {
+            "app_view": app_view if app_view in {"create", "jobs", "history"} else "create",
             "form": form,
             "presets": visible_presets,
             "selected_preset": selected_preset,
@@ -4386,17 +4498,83 @@ def index(
     )
 
 
-@app.get("/help", response_class=HTMLResponse)
-def help_page(
+@app.get("/", response_class=HTMLResponse)
+def index(
+    request: Request,
+    preset: Optional[str] = None,
+    recent: Optional[int] = None,
+    form_error: Optional[str] = None,
+    test_mode: Optional[str] = None,
+):
+    return _render_index_page(
+        request=request,
+        app_view="create",
+        preset=preset,
+        recent=recent,
+        form_error=form_error,
+        test_mode=test_mode,
+    )
+
+
+@app.get("/app/create", response_class=HTMLResponse)
+def app_create(
+    request: Request,
+    preset: Optional[str] = None,
+    recent: Optional[int] = None,
+    form_error: Optional[str] = None,
+    test_mode: Optional[str] = None,
+):
+    return _render_index_page(
+        request=request,
+        app_view="create",
+        preset=preset,
+        recent=recent,
+        form_error=form_error,
+        test_mode=test_mode,
+    )
+
+
+@app.get("/app/jobs", response_class=HTMLResponse)
+def app_jobs(
+    request: Request,
+    test_mode: Optional[str] = None,
+):
+    return _render_index_page(
+        request=request,
+        app_view="jobs",
+        test_mode=test_mode,
+    )
+
+
+@app.get("/app/history", response_class=HTMLResponse)
+def app_history(
+    request: Request,
+    test_mode: Optional[str] = None,
+):
+    return _render_index_page(
+        request=request,
+        app_view="history",
+        test_mode=test_mode,
+    )
+
+
+@app.get("/tutorial", response_class=HTMLResponse)
+def tutorial_page(
     request: Request,
     test_mode: Optional[str] = None,
 ):
     is_test_mode = _bool_from_any(test_mode)
+    payload = _load_tutorial_page_data()
     return templates.TemplateResponse(
         request,
-        "help.html",
+        "tutorial.html",
         {
             "is_test_mode": is_test_mode,
+            "tutorial_ok": payload["ok"],
+            "tutorial_error": payload["error"],
+            "tutorial_html": payload["html"],
+            "tutorial_sections": payload["sections"],
+            "tutorial_source_path": payload["source_path"],
         },
     )
 

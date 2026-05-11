@@ -22,6 +22,12 @@ UI:
 - local: `http://127.0.0.1`
 - remote: `http://<vm-ip>`
 
+Main UI routes:
+- `/app/create`
+- `/app/jobs`
+- `/app/history`
+- `/tutorial`
+
 ## 3) Health check
 
 ```bash

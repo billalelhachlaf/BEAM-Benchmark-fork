@@ -44,6 +44,13 @@ Open:
 The web application is exposed on host port `80`. The internal container port is
 an implementation detail.
 
+Main UI routes:
+
+- `/app/create`
+- `/app/jobs`
+- `/app/history`
+- `/tutorial`
+
 ## Configure
 
 You can override runtime settings with shell variables or a local `.env` file.
@@ -56,6 +63,7 @@ MAX_WORKERS_PER_JOB=8
 ALIGN_MAX_WORKERS=8
 WIKIDATA_QUERY_TIMEOUT=300
 SAKEY_MAX_CONCURRENT=1
+BEAM_STATE_DIR=/data/beam-app
 ```
 
 Then restart:

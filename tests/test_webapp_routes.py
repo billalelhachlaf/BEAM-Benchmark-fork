@@ -857,6 +857,30 @@ def test_build_detail_page_renders_existing_build(monkeypatch, test_wdc_classes)
     assert "Parts Used" in resp.text
 
 
+def test_tutorial_page_renders_and_is_linked(monkeypatch, test_wdc_classes):
+    client, _web_main = _client_with_test_classes(monkeypatch, test_wdc_classes)
+    with client:
+        home = client.get("/?test_mode=1")
+        tutorial = client.get("/tutorial?test_mode=1")
+
+    assert home.status_code == 200
+    assert 'href="/tutorial?test_mode=1"' in home.text
+    assert tutorial.status_code == 200
+    assert "<title>BEAM Tutorial</title>" in tutorial.text
+    assert "Source:" in tutorial.text
+
+
+def test_tutorial_page_missing_source_shows_fallback(monkeypatch, test_wdc_classes):
+    client, web_main = _client_with_test_classes(monkeypatch, test_wdc_classes)
+    monkeypatch.setattr(web_main, "TUTORIAL_MD_PATH", Path("docs/user/_missing_tutorial.md"))
+
+    with client:
+        tutorial = client.get("/tutorial?test_mode=1")
+
+    assert tutorial.status_code == 200
+    assert "Tutorial source not found" in tutorial.text
+
+
 def test_build_detail_page_missing_build_redirects_to_index(monkeypatch, test_wdc_classes):
     client, _web_main = _client_with_test_classes(monkeypatch, test_wdc_classes)
 

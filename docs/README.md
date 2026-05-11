@@ -5,8 +5,10 @@ This documentation is organized by audience and depth.
 ## 1. Start Here
 
 - Repository entrypoint: [../README.md](../README.md)
+- In-app onboarding: open `/tutorial` from the dashboard top bar
 - Project structure and boundaries: [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)
 - Quality checklist: [QUALITY_CHECKLIST.md](QUALITY_CHECKLIST.md)
+- Documentation style guide: [DOC_STYLE.md](DOC_STYLE.md)
 - Audit template: [AUDIT_TEMPLATE.md](AUDIT_TEMPLATE.md)
 
 ## 2. Admin Documentation
@@ -27,6 +29,12 @@ This documentation is organized by audience and depth.
 - Recipes by use case: [user/recipes.md](user/recipes.md)
 - Results interpretation: [user/results_interpretation.md](user/results_interpretation.md)
 - FAQ: [user/faq.md](user/faq.md)
+
+Recommended user path:
+1. Open in-app `/tutorial`.
+2. Run one small benchmark job.
+3. Use `user/recipes.md` to refine matching strategy.
+4. Use `user/results_interpretation.md` to evaluate outputs.
 
 ## 4. Processing and Algorithms (Code-Level)
 

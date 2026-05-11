@@ -1,4 +1,5 @@
 # Python
+
 .run
 __pycache__/
 **/__pycache__/
@@ -37,7 +38,7 @@ reports/
 test-results/
 jobs/
 x
-
+temp/
 # Local helper files
 sync.sh
 
@@ -46,6 +47,7 @@ $NT
 keys.nt
 SAKEY/
 bert-int/
+Exp/
 
 # OS/Editor
 .DS_Store

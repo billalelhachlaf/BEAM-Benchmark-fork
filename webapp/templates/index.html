@@ -2,6 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>BEAM Benchmark Generator</title>
   <style>
     :root{
@@ -760,18 +761,20 @@
       }
     }
   </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/beam-ui.css?v=20260511-2" />
+  <link rel="stylesheet" href="/static/css/beam-dashboard.css?v=20260511-2" />
 </head>
-<body>
+<body data-app-view="{{ app_view or 'create' }}">
   <div id="toast-wrap" class="toast-wrap"></div>
   <div class="page">
-  <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-    <h1 style="margin:0;">BEAM Benchmark Generator</h1>
-    <div style="display:flex; gap:8px; align-items:center;">
-      <a href="/tutorial{% if is_test_mode %}?test_mode=1{% endif %}" style="display:inline-block; padding:8px 12px; border:1px solid var(--border); border-radius:8px; text-decoration:none; color:#bfdbfe; background:#13233a;">Tutorial</a>
-      <a href="/sakey{% if is_test_mode %}?test_mode=1{% endif %}" style="display:inline-block; padding:8px 12px; border:1px solid var(--border); border-radius:8px; text-decoration:none; color:#bfdbfe; background:#13233a;">SAKEY Explorer</a>
-    </div>
-  </div>
+{% set active_tab = app_view or 'create' %}
+  {% set shell_subtitle = 'Workspace SaaS · Data Operations' %}
+  {% include 'partials/app_shell_topbar.html' %}
 
+  <section id="create-section" class="app-view-section">
   <div class="card" style="margin-bottom:12px;">
     <h3>Start with a preset, use a recent run, or fill the form manually below</h3>
   </div>
@@ -797,7 +800,15 @@
   </div>
 
   <form id="generate-form" method="post" action="/jobs" class="card" style="margin-top:16px;">
+    <div class="wizard-head">
+      <div class="wizard-step" data-step-nav="1"><span>1</span>Scope</div>
+      <div class="wizard-step" data-step-nav="2"><span>2</span>Mapping</div>
+      <div class="wizard-step" data-step-nav="3"><span>3</span>Endpoint</div>
+      <div class="wizard-step" data-step-nav="4"><span>4</span>Parts</div>
+      <div class="wizard-step" data-step-nav="5"><span>5</span>Validation</div>
+    </div>
     <div class="small">Fields marked with <span class="required-star active">*</span> are mandatory.</div>
+    <div class="wizard-panel" data-step-panel="1">
     <div class="field-group" id="matching-mode-group">
       <label>
         <span class="label-help">
@@ -873,7 +884,9 @@
         </div>
       </div>
     </div>
+    </div>
 
+    <div class="wizard-panel" data-step-panel="2">
     <div class="property-mapping-subsection">
       <p class="subsection-title">Property Mapping</p>
       <div class="small subsection-help">Configure how WDC values are matched to target endpoint values.</div>
@@ -913,7 +926,9 @@
         </div>
       </div>
     </div>
+    </div>
 
+    <div class="wizard-panel" data-step-panel="3">
     <div class="property-mapping-subsection">
       <p class="subsection-title">SPARQL Prefixes</p>
       <div class="small subsection-help">Optional custom prefix declarations used in target endpoint SPARQL queries.</div>
@@ -927,7 +942,9 @@
         <textarea id="target-prefixes-input" name="target_prefixes" placeholder="PREFIX bd: &lt;http://www.bigdata.com/rdf#&gt;">{{ form.target_prefixes }}</textarea>
       </div>
     </div>
+    </div>
 
+    <div class="wizard-panel" data-step-panel="4">
     <div class="parts-controls-container">
       <div class="parts-controls-grid">
         <div class="parts-controls-main">
@@ -960,6 +977,8 @@
         </div>
       </div>
     </div>
+    </div>
+    <div class="wizard-panel" data-step-panel="5">
     <div id="form-error-box" class="warn" {% if not form_error %}style="display:none"{% endif %}>{{ form_error or "" }}</div>
 
     <div
@@ -978,11 +997,16 @@
     <div class="info small" style="margin-top:10px;">
       <b>Before launch:</b> class selected, parts range kept small for first run, mapping rules filled, endpoint verified.
     </div>
+    </div>
     <div class="form-actions">
+      <button id="wizard-prev-btn" class="btn secondary" type="button">Previous</button>
+      <button id="wizard-next-btn" class="btn secondary" type="button">Next</button>
       <button id="preflight-btn" class="btn secondary" type="button">Run preflight check</button>
       <button class="btn primary" type="submit">Generate benchmark</button>
     </div>
+    <div id="wizard-error-box" class="wizard-error" role="status" aria-live="polite"></div>
   </form>
+  </section>
 
   <div id="mapping-norm-modal" class="mapping-norm-modal" aria-hidden="true">
     <div class="mapping-norm-modal-card">
@@ -1003,6 +1027,7 @@
   </div>
 
   <div class="jobs">
+    <section id="history-section" class="app-view-section">
     <h2>History</h2>
     <div class="history-tools">
       <input id="history-search-input" type="search" placeholder="Search history (class, config, stats, paths, properties...)" autocomplete="off" />
@@ -1162,7 +1187,9 @@
     </div>
     <div class="small" id="build-empty-msg" {% if builds %}style="display:none"{% endif %}>(no completed builds found)</div>
     <div class="small" id="build-search-empty-msg" style="display:none">(no history entries match your search)</div>
+    </section>
 
+    <section id="jobs-section" class="app-view-section">
     <h2>Jobs</h2>
     <div class="history-tools" style="margin-top:8px;">
       <form method="post" action="/jobs/delete_stopped" class="js-async-form">
@@ -1320,8 +1347,11 @@
   {% endif %}
     </div>
     <div class="small" id="jobs-empty-msg" {% if jobs %}style="display:none"{% endif %}>(no jobs to show; successful jobs with downloadable builds are moved to History)</div>
+    </section>
   </div>
 
+<script src="/static/js/beam-ui.js"></script>
+<script src="/static/js/beam-dashboard-shell.js?v=20260511-1"></script>
 <script>
 const activeLogSockets = {};
 const logReconnectTimers = {};

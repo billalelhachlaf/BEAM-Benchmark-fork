@@ -23,6 +23,7 @@ from bs4 import BeautifulSoup
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Form, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from beam import db
@@ -30,6 +31,7 @@ from beam.wdc_classes import fetch_wdc_classes, load_wdc_classes_catalog, save_w
 from scripts import align as align_script
 
 app = FastAPI()
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 TUTORIAL_MD_PATH = Path("docs") / "user" / "tutorial.md"
@@ -4409,9 +4411,9 @@ def _init_db():
     db.init_db()
 
 
-@app.get("/", response_class=HTMLResponse)
-def index(
+def _render_index_page(
     request: Request,
+    app_view: str = "create",
     preset: Optional[str] = None,
     recent: Optional[int] = None,
     form_error: Optional[str] = None,
@@ -4473,6 +4475,7 @@ def index(
         request,
         "index.html",
         {
+            "app_view": app_view if app_view in {"create", "jobs", "history"} else "create",
             "form": form,
             "presets": visible_presets,
             "selected_preset": selected_preset,
@@ -4492,6 +4495,66 @@ def index(
                 for k, v in TARGET_ENDPOINTS.items()
             ],
         },
+    )
+
+
+@app.get("/", response_class=HTMLResponse)
+def index(
+    request: Request,
+    preset: Optional[str] = None,
+    recent: Optional[int] = None,
+    form_error: Optional[str] = None,
+    test_mode: Optional[str] = None,
+):
+    return _render_index_page(
+        request=request,
+        app_view="create",
+        preset=preset,
+        recent=recent,
+        form_error=form_error,
+        test_mode=test_mode,
+    )
+
+
+@app.get("/app/create", response_class=HTMLResponse)
+def app_create(
+    request: Request,
+    preset: Optional[str] = None,
+    recent: Optional[int] = None,
+    form_error: Optional[str] = None,
+    test_mode: Optional[str] = None,
+):
+    return _render_index_page(
+        request=request,
+        app_view="create",
+        preset=preset,
+        recent=recent,
+        form_error=form_error,
+        test_mode=test_mode,
+    )
+
+
+@app.get("/app/jobs", response_class=HTMLResponse)
+def app_jobs(
+    request: Request,
+    test_mode: Optional[str] = None,
+):
+    return _render_index_page(
+        request=request,
+        app_view="jobs",
+        test_mode=test_mode,
+    )
+
+
+@app.get("/app/history", response_class=HTMLResponse)
+def app_history(
+    request: Request,
+    test_mode: Optional[str] = None,
+):
+    return _render_index_page(
+        request=request,
+        app_view="history",
+        test_mode=test_mode,
     )
 
 

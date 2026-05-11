@@ -1,0 +1,15 @@
+<div class="app-shell-topbar card u-mb-12">
+  <div class="app-shell-topbar-wrap">
+    <div class="app-shell-brand">
+      <h1 class="app-shell-brand-title">BEAM Benchmark Generator</h1>
+      {% if shell_subtitle %}<div class="small">{{ shell_subtitle }}</div>{% endif %}
+    </div>
+    <div class="app-shell-nav-list">
+      <a href="/app/create{% if is_test_mode %}?test_mode=1{% endif %}" class="app-nav-link {% if active_tab == 'create' %}active{% endif %}" data-app-nav="create">Create Run</a>
+      <a href="/app/jobs{% if is_test_mode %}?test_mode=1{% endif %}" class="app-nav-link {% if active_tab == 'jobs' %}active{% endif %}" data-app-nav="jobs">Jobs</a>
+      <a href="/app/history{% if is_test_mode %}?test_mode=1{% endif %}" class="app-nav-link {% if active_tab == 'history' %}active{% endif %}" data-app-nav="history">History</a>
+      <a href="/tutorial{% if is_test_mode %}?test_mode=1{% endif %}" class="app-nav-link {% if active_tab == 'tutorial' %}active{% endif %}">Tutorial</a>
+      <a href="/sakey{% if is_test_mode %}?test_mode=1{% endif %}" class="app-nav-link {% if active_tab == 'sakey' %}active{% endif %}">SAKEY Explorer</a>
+    </div>
+  </div>
+</div>

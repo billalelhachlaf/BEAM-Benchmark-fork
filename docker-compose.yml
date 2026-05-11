@@ -2,7 +2,7 @@ services:
   webapp:
     image: beam-benchmark-fork:latest
     build: .
-    command: python -m uvicorn webapp.main:app --host 0.0.0.0 --port 8501
+    command: python -m uvicorn webapp.main:app --host 0.0.0.0 --port 8501 --reload
     environment:
       WEBAPP_HOST: 0.0.0.0
       WEBAPP_PORT: 8501
@@ -11,6 +11,7 @@ services:
     ports:
       - "8501:8501"
     volumes:
+      - ./:/app
       - ./docker-data:/state
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8501/"]

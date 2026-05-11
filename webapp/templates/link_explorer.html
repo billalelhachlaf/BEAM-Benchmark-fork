@@ -2,6 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Link Explorer</title>
   <style>
     :root{
@@ -212,9 +213,17 @@
       .layout { grid-template-columns:1fr; }
     }
   </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/beam-ui.css?v=20260511-2" />
+  <link rel="stylesheet" href="/static/css/beam-dashboard.css?v=20260511-2" />
 </head>
 <body>
   <div class="page">
+    {% set active_tab = '' %}
+    {% set shell_subtitle = '' %}
+    {% include 'partials/app_shell_topbar.html' %}
     <a class="back-link" href="/builds/{{ build.class_name|urlencode }}/{{ build.build_name|urlencode }}{% if is_test_mode %}?test_mode=1{% endif %}">&larr; Back to build detail</a>
 
     <div class="card header">

@@ -15,8 +15,8 @@ Map WDC entities to Wikidata entities with configurable matching strategies.
 ## Core Logic
 
 Code references:
-- `scripts/align.py`
-- `beam/pipeline.py`
+- `scripts/align.py` and `scripts/align_modules/`
+- `beam/pipeline.py` and `beam/pipeline_modules/`
 
 Processing steps:
 1. Read WDC triples for target parts.

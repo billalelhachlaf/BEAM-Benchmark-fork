@@ -45,7 +45,7 @@ Expected:
 
 ## First Successful Run (UI)
 1. Open `http://localhost:8501/app/create`.
-2. Use the wizard steps (`Scope -> Mapping -> Endpoint -> Parts -> Validation`).
+2. Use the wizard steps (`Scope -> Mapping -> Prefixes -> Parts -> Validation`).
 3. For a first run: `Matching mode=property`, valid `Class name`, `Parts=0-2`, and at least one mapping rule.
 4. Keep `Target endpoint=wikidata`.
 5. Run `Preflight` then `Generate benchmark`.
@@ -108,17 +108,16 @@ Global index:
 - [docs/README.md](docs/README.md)
 
 ## Core Components
-- `webapp/main.py`: FastAPI UI/API layer
-- `worker/run.py`: job execution loop
-- `beam/pipeline.py`: orchestration and error handling
-- `scripts/align.py`: matching and endpoint querying
-- `scripts/build_beam_files.py`: BEAM artifact generation
+- `webapp/main.py`: small FastAPI loader kept as the stable app entrypoint.
+- `webapp/modules/`: UI/API routes and web services, split by domain.
+- `webapp/templates/`: page templates; large pages are split into `partials/`.
+- `worker/run.py`: small worker entrypoint.
+- `worker/run_modules/`: queue polling, job execution, and progress helpers.
+- `beam/pipeline.py`: small pipeline entrypoint.
+- `beam/pipeline_modules/`: pipeline discovery, graph build, and orchestration.
+- `scripts/align.py`: small alignment entrypoint.
+- `scripts/align_modules/`: matching, endpoint querying, and alignment execution.
+- `scripts/build_beam_files.py`: small build entrypoint.
+- `scripts/build_beam_files_modules/`: parsing, enrichment, output writing, and CLI.
 
-## UI Design Guardrails (Uncodixfy)
-
-The project now includes Uncodixfy guidelines to avoid generic AI-generated UI patterns when editing frontend templates/styles.
-
-- Ruleset: [docs/uncodixfy/Uncodixfy.md](docs/uncodixfy/Uncodixfy.md)
-- Skill format: [docs/uncodixfy/SKILL.md](docs/uncodixfy/SKILL.md)
-- Upstream reference: [docs/uncodixfy/README_UPSTREAM.md](docs/uncodixfy/README_UPSTREAM.md)
-- License: [docs/uncodixfy/LICENSE](docs/uncodixfy/LICENSE)
+Rule: keep source files readable. New code should normally stay under `500-1000` lines per file and move domain logic into the matching `*_modules/` folder.

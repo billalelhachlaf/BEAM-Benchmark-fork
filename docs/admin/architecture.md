@@ -21,11 +21,16 @@ BEAM-App repose sur 2 processus principaux:
 
 ## Composants principaux
 
-- `webapp/main.py`: routes UI/API et orchestration interface.
-- `worker/run.py`: moteur d'execution queue.
-- `beam/pipeline.py`: pipeline de haut niveau.
-- `scripts/align.py`: logique de matching/linking.
-- `scripts/build_beam_files.py`: generation fichiers BEAM.
+- `webapp/main.py`: point d'entree FastAPI stable.
+- `webapp/modules/`: routes UI/API et services web.
+- `worker/run.py`: point d'entree worker stable.
+- `worker/run_modules/`: moteur d'execution queue.
+- `beam/pipeline.py`: point d'entree pipeline stable.
+- `beam/pipeline_modules/`: pipeline de haut niveau.
+- `scripts/align.py`: point d'entree align stable.
+- `scripts/align_modules/`: logique de matching/linking.
+- `scripts/build_beam_files.py`: point d'entree build stable.
+- `scripts/build_beam_files_modules/`: generation fichiers BEAM.
 
 ## Donnees et etat
 

@@ -1,6 +1,6 @@
 # User Tutorial (SaaS UI)
 
-Updated: 2026-05-11  
+Updated: 2026-05-12  
 Audience: benchmark users (no code changes required)
 
 ## 1. Open the App
@@ -25,16 +25,24 @@ Audience: benchmark users (no code changes required)
 The Create page is step-based:
 - `1. Scope`
 - `2. Mapping`
-- `3. Endpoint`
+- `3. Prefixes`
 - `4. Parts`
 - `5. Validation`
 
 Use `Next`/`Previous`. The wizard blocks progression when required fields are missing.
 
+The layout is simple:
+- Create page: configuration wizard,
+- Jobs page: running and queued work,
+- History page: completed builds,
+- Tutorial page: this guide.
+
 ### 1) Scope
 - `property`: align by value matching between WDC and endpoint properties.
 - `sameas`: align through explicit resource links.
 - `sameas_or_property`: union of both strategies.
+- `Target endpoint`: `wikidata`, `dbpedia`, `yago`, or `custom`.
+- `Custom endpoint URL`: required only when endpoint is `custom`.
 - `Class name`: WDC class to process (for example `Movie`, `City`, `Language`).
 - `Target class filter`: optional semantic constraint (QID for Wikidata, class URI/prefix for other endpoints).
 
@@ -45,10 +53,9 @@ Use `Next`/`Previous`. The wizard blocks progression when required fields are mi
   - target alternatives allowed (example: `P212|P957`)
 - Per-row normalization can be configured from the mapping UI controls.
 
-### 3) Endpoint
-- `Target endpoint`: `wikidata`, `dbpedia`, `yago`, or `custom`.
-- `Custom endpoint URL`: required only when endpoint is `custom`.
-- `Custom prefixes`: optional SPARQL prefixes.
+### 3) Prefixes
+- `Custom prefixes`: optional SPARQL prefixes for target endpoint queries.
+- Leave empty unless the target endpoint requires extra `PREFIX` declarations.
 
 ### 4) Parts and execution controls
 - `Parts to process`: `all`, `0,2,4`, or `0-10`.
@@ -72,6 +79,8 @@ In `/app/history`, open a completed build and verify:
 - `ent_links` exists and is non-empty,
 - `attr_triples_*` and `rel_triples_*` exist,
 - `stats.json` and `BUILD_CONFIG.json` are present.
+
+Use the build detail page for the full file summary. Use the link explorer when you need to inspect individual WDC-to-target links and their property evidence.
 
 ## 6. Recovery Patterns
 

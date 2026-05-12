@@ -56,13 +56,6 @@ Recommended user path:
 - Current limits: [limits.md](limits.md)
 - Wikidata reference: [wikidata_reference.md](wikidata_reference.md)
 
-## 7. UI Design Guidelines
-
-- Uncodixfy ruleset: [uncodixfy/Uncodixfy.md](uncodixfy/Uncodixfy.md)
-- Skill format: [uncodixfy/SKILL.md](uncodixfy/SKILL.md)
-- Upstream README (mirrored): [uncodixfy/README_UPSTREAM.md](uncodixfy/README_UPSTREAM.md)
-- License: [uncodixfy/LICENSE](uncodixfy/LICENSE)
-
 ## Documentation Done Criteria
 
 - An admin can deploy and operate without external help.

@@ -7,6 +7,7 @@ Transform aligned entities into BEAM-compatible files for model training/evaluat
 ## Entry Point
 
 - `scripts/build_beam_files.py`
+- implementation modules: `scripts/build_beam_files_modules/`
 - Main orchestrator: `run_pipeline(...)`.
 
 ## Processing Steps

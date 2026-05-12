@@ -1,0 +1,324 @@
+  <div class="jobs">
+    <section id="history-section" class="app-view-section">
+    <h2>History</h2>
+    <div class="history-tools">
+      <input id="history-search-input" type="search" placeholder="Search history (class, config, stats, paths, properties...)" autocomplete="off" />
+      <select id="history-sort-select" aria-label="Sort history">
+        <option value="recent">Sort: newest first</option>
+        <option value="links_desc">Sort: entity links (high to low)</option>
+        <option value="links_asc">Sort: entity links (low to high)</option>
+      </select>
+      <button class="btn secondary" id="history-visibility-toggle-btn" type="button">Show: all</button>
+      <form method="post" action="/builds/download_selected" id="download-selected-builds-form">
+        <input type="hidden" name="selected_builds" id="selected-builds-input" value="[]" />
+        <button class="btn secondary" id="history-download-selected-btn" type="button" disabled style="display:none">Download selected (0)</button>
+      </form>
+      <form method="post" action="/builds/purge_low_links" class="js-async-form" id="purge-low-links-form">
+        <input type="hidden" name="max_links" value="10" />
+        <button class="btn danger" type="submit">Purge builds &lt; 10 links</button>
+      </form>
+    </div>
+    <div id="build-list">
+      {% if builds %}
+      {% for b in builds %}
+      {% set v = b.with_link or b.without_link %}
+      <div class="build selectable-card" id="build-card-{{ loop.index0 }}" data-build-id="{{ loop.index0 }}" data-build-key="{{ b.class_name }}::{{ b.build_name }}" data-class-name="{{ b.class_name }}" data-build-name="{{ b.build_name }}" data-build-detail-url="/builds/{{ b.class_name|urlencode }}/{{ b.build_name|urlencode }}{% if is_test_mode %}?test_mode=1{% endif %}" data-build-done-at="{{ b.done_at or '' }}" data-links-count="{{ (v.links_count if v and v.links_count is not none else 0) }}">
+        <div class="build-head">
+          <div class="header-left">
+            <label class="build-select-wrap" title="Select build" data-no-card-toggle>
+              <input type="checkbox" class="build-select-checkbox" data-no-card-toggle />
+            </label>
+            <a class="btn-icon js-toggle-build" data-build-id="{{ loop.index0 }}" href="/builds/{{ b.class_name|urlencode }}/{{ b.build_name|urlencode }}{% if is_test_mode %}?test_mode=1{% endif %}" title="Open details" aria-label="Open details">&#8599;</a>
+            <div>
+              <a class="build-title-link" href="/builds/{{ b.class_name|urlencode }}/{{ b.build_name|urlencode }}{% if is_test_mode %}?test_mode=1{% endif %}"><b>{{ b.class_name }}</b></a>
+              <span class="small">
+                · {{ b.endpoint_label or 'Wikidata' }}
+                {% if b.linking_elements_text %} - {{ b.linking_elements_text }}{% endif %}
+                - {{ b.done_label or 'Last update' }}: {{ b.done_at or 'N/A' }} · Links: {{ v.links_count if v and v.links_count is not none else 0 }}
+              </span>
+              {% if b.linking_stats_text %}
+              <div class="small">{{ b.linking_stats_text }}</div>
+              {% endif %}
+            </div>
+          </div>
+          <div class="head-actions">
+            <button class="btn-icon star off js-toggle-build-star" type="button" data-no-card-toggle data-build-key="{{ b.class_name }}::{{ b.build_name }}" title="Mark build" aria-label="Mark build">&#9734;</button>
+            <form method="post" action="/builds/{{ b.class_name|urlencode }}/{{ b.build_name|urlencode }}/delete" class="js-async-form" data-delete-target="build-card-{{ loop.index0 }}">
+              <button class="btn-icon danger" type="submit" title="Delete build" aria-label="Delete build">&#128465;</button>
+            </form>
+          </div>
+        </div>
+        <div class="build-body" id="build-body-{{ loop.index0 }}">
+        <div class="small build-path">Path: {{ b.path }}</div>
+        <div class="build-actions">
+          <form method="get" action="/builds/{{ b.class_name|urlencode }}/{{ b.build_name|urlencode }}/download">
+            <button class="btn secondary" type="submit">Download build</button>
+          </form>
+          <form method="post" action="/builds/{{ b.class_name|urlencode }}/{{ b.build_name|urlencode }}/rerun" class="js-async-form">
+            <button class="btn secondary" type="submit">Rerun same config</button>
+          </form>
+          <form method="post" action="/builds/{{ b.class_name|urlencode }}/{{ b.build_name|urlencode }}/delete" class="js-async-form" data-delete-target="build-card-{{ loop.index0 }}">
+            <button class="btn danger" type="submit">Delete build</button>
+          </form>
+        </div>
+        {% if v %}
+        <div class="build-tiles">
+          <div class="tile">
+            <div class="tile-label">Total Size</div>
+            <div class="tile-value">{{ v.size_total_h }}</div>
+          </div>
+          <div class="tile">
+            <div class="tile-label">Entity Links</div>
+            <div class="tile-value">{{ v.links_count }}</div>
+          </div>
+          <div class="tile">
+            <div class="tile-label">WDC Properties</div>
+            <div class="tile-value">{{ v.wdc_props }}</div>
+          </div>
+          <div class="tile">
+            <div class="tile-label">WD Properties</div>
+            <div class="tile-value">{{ v.wd_props }}</div>
+          </div>
+        </div>
+        <div class="qa-box">
+          <div><b>Result QA</b></div>
+          {% if v.qa_warnings %}
+            <div class="small qa-warning">{{ v.qa_warnings | join("; ") }}</div>
+          {% else %}
+            <div class="small">No major issues detected.</div>
+          {% endif %}
+          {% if v.sample_links %}
+          <div class="qa-block">
+            <div class="small"><b>Sample entity links</b></div>
+            {% for row in v.sample_links %}
+            <div class="qa-kv">
+              <div class="qa-left">{{ row.wdc_iri }}</div>
+              <div class="qa-right">{{ row.wikidata_uri }}</div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% if v.top_wdc_props or v.top_wd_props %}
+          <div class="qa-block">
+            {% if v.top_wdc_props %}
+              <div class="small"><b>Top WDC properties</b></div>
+              {% for row in v.top_wdc_props %}
+              <div class="qa-kv">
+                <div class="qa-left">{{ row.property }}</div>
+                <div class="qa-right">{{ row.count }}</div>
+              </div>
+              {% endfor %}
+            {% endif %}
+            {% if v.top_wd_props %}
+              <div class="small" style="margin-top:6px;"><b>Top target properties</b></div>
+              {% for row in v.top_wd_props %}
+              <div class="qa-kv">
+                <div class="qa-left">{{ row.property }}</div>
+                <div class="qa-right">{{ row.count }}</div>
+              </div>
+              {% endfor %}
+            {% endif %}
+          </div>
+          {% endif %}
+        </div>
+        {% endif %}
+        <div class="build-config">
+          <div><b>Config</b></div>
+          {% for g in b.config_groups %}
+          <div class="cfg-group">
+            <div class="cfg-title">{{ g["title"] }}</div>
+            {% for k, val in g["items"] %}
+            <div class="cfg-row">
+              <div class="cfg-key">{{ k }}</div>
+              <div class="cfg-val">{{ val }}</div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+        {% if b.parts_manifest %}
+        <div class="parts-box">
+          <div class="parts-head">
+            <div><b>Parts Used</b> <span class="small">({{ b.parts_count }})</span></div>
+            {% if b.parts_total_size_human %}<div class="small">Total: {{ b.parts_total_size_human }}</div>{% endif %}
+          </div>
+          <div class="parts-list">
+            {% for p in b.parts_manifest %}
+            <div class="part-row">
+              <div class="part-name">{{ p.get("name", "") }}</div>
+              <div class="part-size">{{ p.get("size_human", "") }}</div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+      {% endif %}
+    </div>
+    <div class="small" id="build-empty-msg" {% if builds %}style="display:none"{% endif %}>(no completed builds found)</div>
+    <div class="small" id="build-search-empty-msg" style="display:none">(no history entries match your search)</div>
+    </section>
+
+    <section id="jobs-section" class="app-view-section">
+    <h2>Jobs</h2>
+    <div class="history-tools" style="margin-top:8px;">
+      <form method="post" action="/jobs/delete_stopped" class="js-async-form">
+        <button class="btn danger" type="submit">Delete stopped jobs</button>
+      </form>
+    </div>
+    <div id="jobs-list">
+  {% if jobs %}
+    {% for job in jobs %}
+      <div class="job selectable-card" id="job-card-{{ job.id }}" data-job-id="{{ job.id }}" data-job-status="{{ job.status }}" data-job-phase="{{ job.phase or '' }}" data-class-name="{{ jobs_params[job.id].get('class_name', '') }}">
+        <div class="job-header">
+          <div class="header-left">
+            <button type="button" class="btn-icon js-toggle-job" data-job-id="{{ job.id }}" data-job-status="{{ job.status }}">-</button>
+            <div><b>Job {{ job.id }}</b></div>
+          </div>
+          <div class="job-controls">
+            {% set job_cancelling = job.cancel_requested and job.status in ['running', 'queued'] %}
+            {% if job_cancelling %}
+              <div class="pill cancel" id="job-pill-{{ job.id }}">cancelling{% if job.phase %} · {{ job.phase }}{% endif %}</div>
+            {% else %}
+              <div class="pill {% if job.status == 'running' %}run{% elif job.status in ['done'] %}ok{% elif job.status in ['error','interrupted','cancelled'] %}err{% endif %}" id="job-pill-{{ job.id }}">
+                {{ job.status }}{% if job.phase %} · {{ job.phase }}{% endif %}
+              </div>
+            {% endif %}
+            <form
+              method="post"
+              action="/jobs/{{ job.id }}/delete"
+              class="js-async-form"
+              data-delete-target="job-card-{{ job.id }}"
+              id="job-delete-icon-wrap-{{ job.id }}"
+              {% if job.status in ["running", "queued"] %}style="display:none"{% endif %}
+            >
+              <button class="btn-icon danger" type="submit" title="Delete job" aria-label="Delete job">&#128465;</button>
+            </form>
+          </div>
+        </div>
+        <div class="job-body" id="job-body-{{ job.id }}">
+        <div class="small">Created: {{ jobs_times[job.id].created or (job.created_at | int) }}</div>
+        {% if jobs_times[job.id].started %}<div class="small">Started: {{ jobs_times[job.id].started }}</div>{% endif %}
+        {% if jobs_times[job.id].ended %}<div class="small">Ended: {{ jobs_times[job.id].ended }}</div>{% endif %}
+        <div class="config-box">
+          <div><b>Config</b></div>
+          <div class="kv-pills">
+            {% for k, val in jobs_params[job.id].items() %}
+              <span class="kv-pill"><b>{{ k }}</b>: {{ val }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="warn" id="job-error-{{ job.id }}" {% if not job.error_message %}style="display:none"{% endif %}>{{ job.error_message or '' }}</div>
+        <div class="small" id="job-result-{{ job.id }}" {% if not job.result_path %}style="display:none"{% endif %}>
+          Result: {{ job.result_path or '' }}
+        </div>
+        <div class="small" id="job-align-dir-{{ job.id }}" {% if not job.align_dir %}style="display:none"{% endif %}>
+          Align dir: {{ job.align_dir or '' }}{% if job.reused_align %} (cached){% endif %}
+        </div>
+        <div class="small" id="job-final-links-{{ job.id }}">
+          Final entity links (exact): {% if job.final_links_count is not none %}{{ job.final_links_count }}{% else %}—{% endif %}
+        </div>
+        {% set out = jobs_outputs[job.id] %}
+        <div id="job-build-output-{{ job.id }}">
+          {% if out.build_done %}
+            <div class="info">
+              Build completed. Files saved in:
+              {% if out.build_out_with %}<br/>- {{ out.build_out_with }}{% endif %}
+              {% if out.build_out_without %}<br/>- {{ out.build_out_without }}{% endif %}
+            </div>
+          {% elif job.status in ['done'] and job.result_path %}
+            <div class="warn">Job is done but BUILD_DONE marker not found at: {{ out.build_done_file or 'N/A' }}</div>
+          {% endif %}
+        </div>
+
+        <div class="subjobs">
+          {% set subs = jobs_subjobs[job.id] %}
+          {% for sj in subs %}
+          <div class="subjob {{ sj.type }}">
+            <div class="subjob-title">
+                <span>{{ sj.type | upper }}</span>
+              {% set sj_cancelling = sj.cancel_requested and sj.status in ['queued','running'] %}
+              {% if sj_cancelling %}
+                <span class="pill cancel" id="subjob-pill-{{ job.id }}-{{ sj.type }}">cancelling</span>
+              {% elif sj.status == 'done' %}
+                <span class="pill ok" id="subjob-pill-{{ job.id }}-{{ sj.type }}">done</span>
+              {% elif sj.status == 'running' %}
+                <span class="pill run" id="subjob-pill-{{ job.id }}-{{ sj.type }}">running</span>
+              {% elif sj.status in ['error','cancelled','interrupted'] %}
+                <span class="pill err" id="subjob-pill-{{ job.id }}-{{ sj.type }}">{{ sj.status }}</span>
+              {% else %}
+                <span class="pill" id="subjob-pill-{{ job.id }}-{{ sj.type }}">pending</span>
+              {% endif %}
+            </div>
+            <div class="small" id="subjob-progress-{{ job.id }}-{{ sj.type }}">Progress: {{ sj.progress_text or '—' }}</div>
+            <div class="small" id="subjob-eta-{{ job.id }}-{{ sj.type }}">ETA: —</div>
+            <div class="small" id="subjob-step-{{ job.id }}-{{ sj.type }}">{% if sj.current_step %}Step: {{ sj.current_step }}{% endif %}</div>
+            <div class="small" id="subjob-file-{{ job.id }}-{{ sj.type }}">{% if sj.current_file %}File: {{ sj.current_file }}{% endif %}</div>
+            <div class="subjob-actions" id="subjob-cancel-wrap-{{ job.id }}-{{ sj.type }}" {% if not (job.status in ["running", "queued"] and sj.status in ["queued","running"]) %}style="display:none"{% endif %}>
+              <form method="post" action="/jobs/{{ job.id }}/cancel_subjob/{{ sj.type }}" class="js-async-form" data-job-id="{{ job.id }}">
+                <button class="btn secondary" type="submit">Cancel {{ sj.type }}</button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        <details style="margin-top:8px;" open id="details-align-{{ job.id }}">
+          <summary class="small">ALIGN logs</summary>
+          <div class="lane-head" id="lane-head-align-{{ job.id }}">
+            <span><b>Status:</b> <span id="lane-status-align-{{ job.id }}">pending</span></span>
+            <span><b>Step:</b> <span id="lane-step-align-{{ job.id }}">—</span></span>
+            <span><b>ETA:</b> <span id="lane-eta-align-{{ job.id }}">—</span></span>
+            <span><b>Last update:</b> <span id="lane-last-align-{{ job.id }}">—</span></span>
+          </div>
+          <div class="logbox" id="log-align-{{ job.id }}"></div>
+        </details>
+        <details style="margin-top:8px;" id="details-build-{{ job.id }}">
+          <summary class="small">BUILD logs</summary>
+          <div class="lane-head" id="lane-head-build-{{ job.id }}">
+            <span><b>Status:</b> <span id="lane-status-build-{{ job.id }}">pending</span></span>
+            <span><b>Step:</b> <span id="lane-step-build-{{ job.id }}">—</span></span>
+            <span><b>ETA:</b> <span id="lane-eta-build-{{ job.id }}">—</span></span>
+            <span><b>Last update:</b> <span id="lane-last-build-{{ job.id }}">—</span></span>
+          </div>
+          <div class="logbox" id="log-build-{{ job.id }}"></div>
+        </details>
+        <div id="job-cancel-wrap-{{ job.id }}" {% if not (job.status in ["running", "queued"]) %}style="display:none"{% endif %}>
+          <form method="post" action="/jobs/{{ job.id }}/cancel" class="js-async-form" data-job-id="{{ job.id }}">
+            <button class="btn" type="submit">Cancel job</button>
+          </form>
+        </div>
+        <div class="job-actions">
+          <form method="post" action="/jobs/{{ job.id }}/rerun" class="js-async-form" data-job-id="{{ job.id }}">
+            <button class="btn secondary" type="submit">Rerun</button>
+          </form>
+          <form method="post" action="/jobs/{{ job.id }}/rerun_nocache" class="js-async-form" data-job-id="{{ job.id }}">
+            <button class="btn secondary" type="submit">Rerun no cache</button>
+          </form>
+          <form method="post" action="/jobs/{{ job.id }}/rerun_align" class="js-async-form" data-job-id="{{ job.id }}">
+            <button class="btn secondary" type="submit">Rerun align</button>
+          </form>
+          <form method="post" action="/jobs/{{ job.id }}/rerun_build" class="js-async-form" data-job-id="{{ job.id }}">
+            <button class="btn secondary" type="submit">Rerun build</button>
+          </form>
+          <form
+            method="post"
+            action="/jobs/{{ job.id }}/delete"
+            class="js-async-form"
+            data-delete-target="job-card-{{ job.id }}"
+            id="job-delete-wrap-{{ job.id }}"
+            {% if job.status in ["running", "queued"] %}style="display:none"{% endif %}
+          >
+            <button class="btn danger" type="submit">Delete job</button>
+          </form>
+        </div>
+        </div>
+      </div>
+    {% endfor %}
+  {% endif %}
+    </div>
+    <div class="small" id="jobs-empty-msg" {% if jobs %}style="display:none"{% endif %}>(no jobs to show; successful jobs with downloadable builds are moved to History)</div>
+    </section>
+  </div>
+

@@ -1,0 +1,420 @@
+    logLastMessageTs[jobId] = Date.now();
+    ws.send('ping');
+    if (logPingTimers[jobId]) clearInterval(logPingTimers[jobId]);
+    logPingTimers[jobId] = setInterval(() => { if (ws.readyState === 1) ws.send('ping'); }, 500);
+    if (logWatchdogTimers[jobId]) clearInterval(logWatchdogTimers[jobId]);
+    logWatchdogTimers[jobId] = setInterval(() => {
+      const last = logLastMessageTs[jobId] || 0;
+      if (ws.readyState === 1 && (Date.now() - last) > 5000) {
+        try { ws.close(); } catch (_) {}
+      }
+    }, 2000);
+  };
+
+  ws.onmessage = (ev) => {
+    logLastMessageTs[jobId] = Date.now();
+    let payload = null;
+    try { payload = JSON.parse(ev.data); } catch (_) {}
+
+    if (payload && payload.type === 'progress') {
+      applyProgressPayload(jobId, payload);
+      return;
+    }
+
+    if (!payload || payload.type !== 'event') return;
+    const evId = Number(payload.id || 0);
+    if (!seenEventIdsByJob[jobId]) seenEventIdsByJob[jobId] = new Set();
+    if (evId && seenEventIdsByJob[jobId].has(evId)) return;
+    if (evId) seenEventIdsByJob[jobId].add(evId);
+    const tsMs = payload.ts ? Math.round(Number(payload.ts) * 1000) : Date.now();
+    const msg = String(payload.message || '').replace(/\u001b\[[0-9;]*m/g, '').replace(/\r/g, '');
+    if (!msg) return;
+
+    let lane = '';
+    if (payload.phase === 'align' || payload.worker === 'align') lane = 'align';
+    if (payload.phase === 'build' || payload.worker === 'build') lane = 'build';
+    if (!lane && msg.startsWith('ALIGN | ')) lane = 'align';
+    if (!lane && msg.startsWith('BUILD | ')) lane = 'build';
+    if (!lane) lane = 'build';
+
+    const trimmed = msg.startsWith('ALIGN | ') ? msg.slice('ALIGN | '.length)
+      : msg.startsWith('BUILD | ') ? msg.slice('BUILD | '.length)
+      : msg;
+    const box = lane === 'align' ? alignBox : buildBox;
+    appendLogLine(box, `[${new Date(tsMs).toLocaleTimeString()}] ${trimmed}`);
+    updateLaneMeta(jobId, lane, {
+      step: payload.step || undefined,
+      tsMs,
+    });
+  };
+
+  ws.onclose = () => {
+    clearSocketTimers(jobId);
+    if (activeLogSockets[jobId] === ws) delete activeLogSockets[jobId];
+    if (stopReconnectByJob[jobId]) return;
+    const attempts = (logRetryAttempts[jobId] || 0) + 1;
+    logRetryAttempts[jobId] = attempts;
+    const delayMs = Math.min(10000, 500 * (2 ** Math.min(attempts, 5)));
+    logReconnectTimers[jobId] = setTimeout(() => startLogs(jobId), delayMs);
+  };
+
+  ws.onerror = () => {
+    try { ws.close(); } catch (_) {}
+  };
+}
+
+async function pollDashboardOnce() {
+  if (dashboardPollBusy || dashboardReloadQueued) return;
+  dashboardPollBusy = true;
+  try {
+    const res = await fetch(`/api/dashboard?job_limit=80&build_limit=200&test_mode=${DASHBOARD_TEST_MODE}`, {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) return;
+    const payload = await res.json();
+    const jobs = (Array.isArray(payload.jobs) ? payload.jobs : []).filter((j) => {
+      const className = (j && j.params && j.params.class_name) ? j.params.class_name : '';
+      return shouldKeepClassForMode(className);
+    });
+    jobs.forEach((j) => {
+      const jobCard = document.getElementById('job-card-' + j.id);
+      if (!jobCard) return;
+      applyProgressPayload(j.id, {
+        status: j.status,
+        cancel_requested: j.cancel_requested,
+        phase: j.phase,
+        progress_text: j.progress_text,
+        progress_pct: j.progress_pct,
+        current_step: j.current_step,
+        current_file: j.current_file,
+        result_path: j.result_path,
+        align_dir: j.align_dir,
+        reused_align: !!j.reused_align,
+        error_message: j.error_message,
+        final_links_count: j.final_links_count,
+        outputs: j.outputs || {},
+        subjobs: Array.isArray(j.subjobs) ? j.subjobs : [],
+      });
+      if ((j.status === 'running' || j.status === 'queued') && !activeLogSockets[j.id]) {
+        startLogs(j.id);
+      }
+    });
+    const filteredJobIds = new Set(jobs.map((j) => Number(j.id || 0)));
+    const rawVisibleIds = Array.isArray(payload.visible_job_ids || payload.active_job_ids) ? (payload.visible_job_ids || payload.active_job_ids) : [];
+    const visibleIds = rawVisibleIds.filter((id) => filteredJobIds.has(Number(id || 0)));
+    removeDoneJobsFromList(visibleIds);
+    const filteredBuilds = (Array.isArray(payload.builds) ? payload.builds : []).filter((b) => {
+      return shouldKeepClassForMode((b && b.class_name) ? b.class_name : '');
+    });
+    const insertedBuilds = reconcileBuildList(filteredBuilds);
+    const nextBuildCount = filteredBuilds.length;
+    if (insertedBuilds > 0) {
+      const msg = insertedBuilds === 1 ? 'Build is ready to download' : `${insertedBuilds} builds are ready to download`;
+      showToast(msg, 'success', 2400);
+      if (Number.isFinite(nextBuildCount)) {
+        lastReloadQueuedBuildCount = Math.max(lastReloadQueuedBuildCount, nextBuildCount);
+      }
+    } else if (
+      Number.isFinite(nextBuildCount)
+      && nextBuildCount > Number(lastKnownBuildCount || 0)
+      && nextBuildCount > Number(lastReloadQueuedBuildCount || 0)
+    ) {
+      // Fallback: backend saw new build but current DOM did not reconcile for any reason.
+      queueReloadWithToast('Build list updated', 'success', nextBuildCount);
+    }
+    if (Number.isFinite(nextBuildCount) && nextBuildCount >= 0) {
+      lastKnownBuildCount = nextBuildCount;
+    }
+  } catch (_) {
+    // Silent retry on next poll.
+  } finally {
+    dashboardPollBusy = false;
+  }
+}
+
+function setupAsyncForms() {
+  const forms = document.querySelectorAll('form.js-async-form');
+  forms.forEach((form) => {
+    if (form.dataset.bound === '1') return;
+    form.dataset.bound = '1';
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector('button[type="submit"]');
+      if (btn) btn.disabled = true;
+      try {
+        const res = await fetch(form.action, {
+          method: 'POST',
+          body: new FormData(form),
+          credentials: 'same-origin',
+          redirect: 'follow',
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        let redirectedError = '';
+        let purgeCount = '';
+        try {
+          const finalUrl = new URL(res.url, window.location.href);
+          redirectedError = finalUrl.searchParams.get('form_error') || '';
+          purgeCount = finalUrl.searchParams.get('purged') || '';
+        } catch (_) {}
+        if (redirectedError) {
+          if (btn) btn.disabled = false;
+          showFormError(redirectedError);
+          showToast(redirectedError, 'error', 3000);
+          return;
+        }
+        showFormError('');
+        const targetId = form.dataset.deleteTarget;
+        if (targetId) {
+          const el = document.getElementById(targetId);
+          if (el) {
+            const wasBuild = el.classList.contains('build');
+            const wasJob = el.classList.contains('job');
+            el.remove();
+            if (wasBuild) applyHistorySearchFilter();
+            if (wasJob) refreshJobsEmptyState();
+          }
+        }
+        if (form.action.includes('/cancel')) {
+          showToast('Cancellation requested', 'info', 2200);
+        } else if (form.action.includes('/builds/purge_low_links')) {
+          const parsedPurgeCount = Number.parseInt(purgeCount, 10);
+          if (Number.isFinite(parsedPurgeCount)) {
+            const count = Math.max(0, parsedPurgeCount);
+            if (count === 0) {
+              showToast('No builds to purge (<10 links)', 'info', 2200);
+            } else {
+              showToast(`Purged ${count} build${count === 1 ? '' : 's'} (<10 links)`, 'success', 2300);
+            }
+          } else {
+            showToast('Low-link build purge completed', 'success', 2200);
+          }
+          setTimeout(() => window.location.reload(), 260);
+        } else if (form.action.includes('/rerun')) {
+          showToast('Job queued', 'success', 2200);
+          setTimeout(() => window.location.reload(), 350);
+        } else if (form.action.includes('/delete')) {
+          showToast('Deleted', 'success', 2200);
+        }
+        setTimeout(() => pollDashboardOnce(), 120);
+      } catch (err) {
+        if (btn) btn.disabled = false;
+        const detail = (err && err.message) ? ` (${err.message})` : '';
+        showToast(`Action failed${detail}`, 'error', 3000);
+      }
+    });
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const formEl = document.getElementById('generate-form');
+  const preflightBtn = document.getElementById('preflight-btn');
+  const matchingModeSelect = document.getElementById('matching-mode-select');
+  const classNameSelect = document.getElementById('class-name-select');
+  const partsSpecInput = document.getElementById('parts-spec-input');
+  const patternInput = document.getElementById('wdc-pattern-input');
+  const patternSearchInSelect = document.getElementById('wdc-pattern-search-in-select');
+  const patternAddBtn = document.getElementById('wdc-pattern-add-btn');
+  const propertyMappingRulesInput = document.getElementById('property-mapping-rules-input');
+  const targetEndpointSelect = document.getElementById('target-endpoint-select');
+  const targetEndpointUrlInput = document.getElementById('target-endpoint-url-input');
+  const wkdClassInput = document.getElementById('wkd-class-input');
+  const wikidataPropertyInput = document.getElementById('wikidata-property-input');
+  const ignoreCharsInput = document.getElementById('ignore-chars-input');
+  const ignoreCharsCustomInput = document.getElementById('ignore-chars-custom-input');
+  const ignoreCharsCustomAddBtn = document.getElementById('ignore-chars-custom-add-btn');
+  const ignoreCharsCheckboxes = Array.from(document.querySelectorAll('.ignore-char-checkbox'));
+  const useLocalOnlyCheckbox = document.getElementById('use-local-only-checkbox');
+  const mappingNormModal = document.getElementById('mapping-norm-modal');
+  const mappingNormBody = document.getElementById('mapping-norm-modal-body');
+  const mappingNormSaveBtn = document.getElementById('mapping-norm-save-btn');
+  const mappingNormCancelBtn = document.getElementById('mapping-norm-cancel-btn');
+
+  syncIgnoreCharsUiFromHidden();
+  syncIgnoreCharsHiddenFromUi();
+  syncWdcPatternRowsFromHidden();
+  applyMatchingMode(inferMatchingModeFromForm(), false);
+  if (patternAddBtn) {
+    patternAddBtn.addEventListener('click', () => {
+      addWdcPatternRow('', true);
+    });
+  }
+  if (matchingModeSelect) {
+    matchingModeSelect.addEventListener('change', () => {
+      applyMatchingMode(matchingModeSelect.value, true);
+      showFormError('');
+      const preflightBox = document.getElementById('preflight-box');
+      if (preflightBox) {
+        preflightBox.dataset.risk = '';
+      }
+    });
+  }
+  [
+    classNameSelect,
+    partsSpecInput,
+    patternInput,
+    patternSearchInSelect,
+    propertyMappingRulesInput,
+    targetEndpointSelect,
+    targetEndpointUrlInput,
+    wkdClassInput,
+    wikidataPropertyInput,
+    useLocalOnlyCheckbox,
+  ].forEach((el) => {
+    if (!el) return;
+    el.addEventListener('input', () => {
+      syncWikidataPropertyState();
+      updateMatchingGuidance();
+      showFormError('');
+      const preflightBox = document.getElementById('preflight-box');
+      if (preflightBox) {
+        preflightBox.dataset.risk = '';
+      }
+    });
+    el.addEventListener('change', () => {
+      syncWikidataPropertyState();
+      updateMatchingGuidance();
+      showFormError('');
+      const preflightBox = document.getElementById('preflight-box');
+      if (preflightBox) {
+        preflightBox.dataset.risk = '';
+      }
+    });
+  });
+  ignoreCharsCheckboxes.forEach((cb) => {
+    cb.addEventListener('change', onIgnoreCharsChanged);
+  });
+  const addIgnoreCharsCustomFromInput = () => {
+    const raw = normalizeFormText(ignoreCharsCustomInput?.value);
+    if (!raw) return;
+    const added = addIgnoreCharsCustomTokensFromInput(raw, true);
+    if (!added) return;
+    if (ignoreCharsCustomInput) {
+      ignoreCharsCustomInput.value = '';
+      ignoreCharsCustomInput.focus();
+    }
+    onIgnoreCharsChanged();
+  };
+  if (ignoreCharsCustomAddBtn) {
+    ignoreCharsCustomAddBtn.addEventListener('click', addIgnoreCharsCustomFromInput);
+  }
+  if (ignoreCharsCustomInput) {
+    ignoreCharsCustomInput.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      addIgnoreCharsCustomFromInput();
+    });
+  }
+  if (ignoreCharsInput) {
+    ignoreCharsInput.addEventListener('change', () => {
+      syncIgnoreCharsUiFromHidden();
+      updateMatchingGuidance();
+    });
+  }
+  const closeMappingNormModal = () => {
+    if (!mappingNormModal) return;
+    mappingNormModal.classList.remove('open');
+    mappingNormModal.setAttribute('aria-hidden', 'true');
+    activeNormRow = null;
+  };
+  if (mappingNormCancelBtn) {
+    mappingNormCancelBtn.addEventListener('click', closeMappingNormModal);
+  }
+  if (mappingNormModal) {
+    mappingNormModal.addEventListener('click', (event) => {
+      if (event.target === mappingNormModal) closeMappingNormModal();
+    });
+  }
+  if (mappingNormSaveBtn) {
+    mappingNormSaveBtn.addEventListener('click', () => {
+      if (!activeNormRow || !mappingNormBody) {
+        closeMappingNormModal();
+        return;
+      }
+      const norms = Array.from(mappingNormBody.querySelectorAll('.mapping-norm-modal-row'))
+        .map((rowEl) => readModalNormSpec(rowEl));
+      const searchModes = Array.from(mappingNormBody.querySelectorAll('.mapping-norm-modal-row'))
+        .map((rowEl) => {
+          const sel = rowEl.querySelector('.mapping-search-scope-select');
+          const mode = normalizeFormText(sel?.value).toLowerCase();
+          return mode === 'value' ? 'value' : 'predicate';
+        });
+      setRowPairNorms(activeNormRow, norms);
+      setRowPairSearchModes(activeNormRow, searchModes);
+      updateRowNormSummary(activeNormRow);
+      onWdcPatternRowsChanged();
+      closeMappingNormModal();
+    });
+  }
+  if (formEl) {
+    formEl.addEventListener('submit', (event) => {
+      const error = validateGenerateForm();
+      if (error) {
+        event.preventDefault();
+        showFormError(error);
+        return;
+      }
+      showFormError('');
+    });
+  }
+  if (preflightBtn) {
+    preflightBtn.addEventListener('click', () => {
+      runPreflightCheck();
+    });
+  }
+  const classSelect = document.querySelector('select[name="class_name"]');
+  const classPartsInfoEl = document.getElementById('class-parts-info');
+  if (classPartsInfoEl) {
+    try {
+      const initialPayload = JSON.parse(classPartsInfoEl.dataset.initial || '{}');
+      if (initialPayload && initialPayload.class_name) renderClassPartsInfo(initialPayload);
+    } catch (_) {}
+  }
+  if (classSelect) {
+    classSelect.addEventListener('change', () => {
+      refreshClassPartsInfo(classSelect.value);
+    });
+    if (classSelect.value && (!classPartsInfoEl || !classPartsInfoEl.dataset.initial || classPartsInfoEl.dataset.initial === '{}')) {
+      refreshClassPartsInfo(classSelect.value);
+    }
+  }
+  document.querySelectorAll('.job[data-job-id]').forEach((el) => {
+    const id = Number(el.dataset.jobId);
+    if (!id) return;
+    const st = String(el.dataset.jobStatus || '');
+    const ph = String(el.dataset.jobPhase || '');
+    lastStatusByJob[id] = st;
+    if (ph) {
+      phaseByJob[id] = ph;
+      setPhaseLogVisibility(id, ph);
+    }
+    if (TERMINAL_STATUSES.has(st)) terminalHandledByJob[id] = true;
+  });
+  showPendingToastFromStorage();
+  pruneCardsForCurrentMode();
+  bindHistorySearch();
+  bindHistoryVisibilityToggle();
+  bindHistoryBulkDownload();
+  bindBuildMinimize();
+  bindBuildStars();
+  bindJobMinimize();
+  applyHistorySearchFilter();
+  refreshJobsEmptyState();
+  document.querySelectorAll('.job[data-job-id]').forEach((el) => {
+    const id = Number(el.dataset.jobId || 0);
+    if (id > 0) startLogs(id);
+  });
+  setupAsyncForms();
+  pollDashboardOnce();
+  dashboardPollTimer = setInterval(() => pollDashboardOnce(), 3000);
+  setInterval(() => {
+    document.querySelectorAll('.job[data-job-id]').forEach((el) => {
+      const id = Number(el.dataset.jobId);
+      if (!id) return;
+      updateLaneMeta(id, 'align', {});
+      updateLaneMeta(id, 'build', {});
+    });
+  }, 1000);
+});

@@ -1,0 +1,252 @@
+  <section id="create-section" class="app-view-section">
+  <div class="card" style="margin-bottom:12px;">
+    <h3>Start with a preset, use a recent run, or fill the form manually below</h3>
+  </div>
+  <div class="row">
+    <div class="col card">
+      <h3>Example preset</h3>
+      <select id="preset-select" onchange="window.location=this.value ? '/?{% if is_test_mode %}test_mode=1&{% endif %}preset='+encodeURIComponent(this.value) : '/{% if is_test_mode %}?test_mode=1{% endif %}';">
+        <option value="">No preset</option>
+        {% for key, p in presets.items() %}
+          <option value="{{ key }}" {% if selected_preset == key %}selected{% endif %}>{{ p.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col card">
+      <h3>Recent run</h3>
+      <select onchange="if(this.value) window.location='/?{% if is_test_mode %}test_mode=1&{% endif %}recent='+encodeURIComponent(this.value);">
+        <option value="">Select a recent run</option>
+        {% for r in recent_presets %}
+          <option value="{{ r.job_id }}">{{ r.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <form id="generate-form" method="post" action="/jobs" class="card" style="margin-top:16px;">
+    <div class="wizard-head">
+      <div class="wizard-step" data-step-nav="1"><span>1</span>Scope</div>
+      <div class="wizard-step" data-step-nav="2"><span>2</span>Mapping</div>
+      <div class="wizard-step" data-step-nav="3"><span>3</span>Endpoint</div>
+      <div class="wizard-step" data-step-nav="4"><span>4</span>Parts</div>
+      <div class="wizard-step" data-step-nav="5"><span>5</span>Validation</div>
+    </div>
+    <div class="small">Fields marked with <span class="required-star active">*</span> are mandatory.</div>
+    <div class="wizard-panel" data-step-panel="1">
+    <div class="field-group" id="matching-mode-group">
+      <label>
+        <span class="label-help">
+          Matching mode
+          <span class="help-tip" tabindex="0" title="Select the linking strategy. The form will show and enforce only relevant fields for this mode.">?</span>
+        </span>
+      </label>
+      <select id="matching-mode-select" name="matching_mode">
+        <option value="property" {% if form.matching_mode == "property" %}selected{% endif %}>Property (label, telephone, code...)</option>
+        <option value="sameas" {% if form.matching_mode == "sameas" %}selected{% endif %}>sameAs</option>
+        <option value="sameas_or_property" {% if form.matching_mode == "sameas_or_property" %}selected{% endif %}>sameAs OR Property</option>
+      </select>
+    </div>
+
+    <div class="field-group" id="target-endpoint-group">
+      <label>
+        <span class="label-help">
+          Target endpoint
+          <span class="help-tip" tabindex="0" title="Select the SPARQL endpoint used on the target side (Wikidata, DBpedia, YAGO, or custom URL).">?</span>
+        </span>
+      </label>
+      <select id="target-endpoint-select" name="target_endpoint">
+        {% for ep in target_endpoints %}
+          <option value="{{ ep.key }}" data-default-url="{{ ep.default_url }}" {% if form.target_endpoint == ep.key %}selected{% endif %}>{{ ep.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="field-group hidden" id="target-endpoint-url-group">
+      <label>
+        <span class="label-help">
+          Custom endpoint URL
+          <span id="required-target-endpoint-url" class="required-star" aria-label="required">*</span>
+          <span class="help-tip" tabindex="0" title="Used only when endpoint is set to Custom. Example: https://example.org/sparql">?</span>
+        </span>
+      </label>
+      <input id="target-endpoint-url-input" name="target_endpoint_url" value="{{ form.target_endpoint_url }}" placeholder="https://example.org/sparql" />
+    </div>
+
+    <div class="class-scope-subsection">
+      <p class="subsection-title">Class Scope</p>
+      <div class="small subsection-help">Select the WDC class and the target class filter used for matching.</div>
+      <div class="class-scope-grid">
+        <div class="field-group">
+          <label>
+            <span class="label-help">
+              Class name
+              <span id="required-class-name" class="required-star active" aria-label="required">*</span>
+              <span class="help-tip" tabindex="0" title="Choose the WDC class to process (for example City, Movie, Language).">?</span>
+            </span>
+          </label>
+          <select id="class-name-select" name="class_name" required>
+            <option value="">(select class)</option>
+            {% for name, meta in class_meta.items() %}
+              <option value="{{ name }}" {% if form.class_name == name %}selected{% endif %}>{{ name }}</option>
+            {% endfor %}
+            {% if form.class_name and form.class_name not in class_meta %}
+              <option value="{{ form.class_name }}" selected>{{ form.class_name }} (not in cached list)</option>
+            {% endif %}
+          </select>
+        </div>
+
+        <div class="field-group" id="wkd-class-group">
+          <label>
+            <span class="label-help">
+              Target class filter
+              <span id="required-wkd-class" class="required-star" aria-label="required">*</span>
+              <span class="help-tip" tabindex="0" title="Restricts target entities to a class hierarchy. For Wikidata you can use QIDs (example: Q486972). For DBpedia/YAGO use a class URI or prefixed term if supported.">?</span>
+            </span>
+          </label>
+          <input id="wkd-class-input" name="target_class" value="{{ form.target_class }}" placeholder="Q486972 or class URI" />
+          <input type="hidden" name="wkd_class" value="{{ form.wkd_class }}" />
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div class="wizard-panel" data-step-panel="2">
+    <div class="property-mapping-subsection">
+      <p class="subsection-title">Property Mapping</p>
+      <div class="small subsection-help">Configure how WDC values are matched to target endpoint values.</div>
+      <div class="field-group">
+        <label>
+          <span class="label-help">
+            Pattern search scope
+            <span class="help-tip" tabindex="0" title="Choose whether WDC pattern tokens are matched against predicate names or object values. Example: use value + ror.org to match URL values containing ror.org.">?</span>
+          </span>
+        </label>
+        <select id="wdc-pattern-search-in-select" name="wdc_pattern_search_in">
+          <option value="predicate" {% if form.wdc_pattern_search_in != "value" %}selected{% endif %}>Property (predicate)</option>
+          <option value="value" {% if form.wdc_pattern_search_in == "value" %}selected{% endif %}>Value (object/literal)</option>
+        </select>
+      </div>
+
+      <div class="property-mapping-grid">
+        <div class="field-group" id="wdc-pattern-group">
+          <label>
+            <span class="label-help">
+              Property mapping rules (WDC -> Endpoint)
+              <span id="required-wdc-pattern" class="required-star active" aria-label="required">*</span>
+              <span class="help-tip" tabindex="0" title="Each row is one OR rule: WDC property : target property. You can add target alternatives with | (example: P212|P957).">?</span>
+            </span>
+          </label>
+          <div id="wdc-pattern-list" class="pattern-list" aria-live="polite"></div>
+          <div class="pattern-actions">
+            <button id="wdc-pattern-add-btn" class="pattern-add-btn" type="button">Add mapping</button>
+          </div>
+          <input type="hidden" id="wdc-pattern-input" name="wdc_predicate_pattern" value="{{ form.wdc_predicate_pattern }}" required />
+          <input type="hidden" id="property-mapping-rules-input" name="property_mapping_rules" value="{{ form.property_mapping_rules }}" />
+          <input type="hidden" id="wikidata-property-input" name="target_property" value="{{ form.target_property }}" />
+          <input type="hidden" name="wikidata_property" value="{{ form.wikidata_property }}" />
+          <input type="hidden" id="ignore-chars-input" name="ignore_chars" value="{{ form.ignore_chars }}" />
+          <div class="small">Each row maps one WDC property to one endpoint property (target alternatives allowed with <code>|</code>, e.g. <code>P212|P957</code>). Add a new row to create an alternative mapping rule (OR).</div>
+          <div class="small">Applied to both sides before matching. Example: <code>1.2.3.4.5.6</code> and <code>123-456</code> become <code>123456</code> if <code>.</code> and <code>-</code> are removed.</div>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div class="wizard-panel" data-step-panel="3">
+    <div class="property-mapping-subsection">
+      <p class="subsection-title">SPARQL Prefixes</p>
+      <div class="small subsection-help">Optional custom prefix declarations used in target endpoint SPARQL queries.</div>
+      <div class="field-group">
+        <label>
+          <span class="label-help">
+            Custom prefixes
+            <span class="help-tip" tabindex="0" title="One PREFIX declaration per line. Example: PREFIX bd: &lt;http://www.bigdata.com/rdf#&gt;">?</span>
+          </span>
+        </label>
+        <textarea id="target-prefixes-input" name="target_prefixes" placeholder="PREFIX bd: &lt;http://www.bigdata.com/rdf#&gt;">{{ form.target_prefixes }}</textarea>
+      </div>
+    </div>
+    </div>
+
+    <div class="wizard-panel" data-step-panel="4">
+    <div class="parts-controls-container">
+      <div class="parts-controls-grid">
+        <div class="parts-controls-main">
+        <div class="parts-subsection">
+          <p class="subsection-title">Parts</p>
+          <div class="small subsection-help">Choose which parts of the selected class should be processed.</div>
+          <div class="parts-label-row">
+            <label class="parts-label">
+              <span class="label-help">
+                Parts to process
+                <span class="help-tip" tabindex="0" title="Choose which class parts to scan (0-based): all, a list like 0,2,4, or a range like 0-10.">?</span>
+              </span>
+            </label>
+            <label class="checkrow parts-inline-toggle">
+              <input id="use-local-only-checkbox" type="checkbox" name="use_local_only" {% if form.use_local_only %}checked{% endif %}>
+              Use local parts only (no downloads)
+              <span class="help-tip" tabindex="0" title="Process only parts already present in Download/ClassName and never download missing parts from WDC.">?</span>
+            </label>
+          </div>
+          <input id="parts-spec-input" name="parts_spec" value="{{ form.parts_spec }}" placeholder="all, 0,2,4, or 0-10" />
+        </div>
+        </div>
+        <div class="parts-controls-flags">
+          <label class="checkrow">
+            <input id="force-align-checkbox" type="checkbox" name="force_align" {% if form.force_align %}checked{% endif %}>
+            Ignore align cache (force re-run align)
+            <span class="help-tip" tabindex="0" title="Forces a fresh alignment run even if a matching align cache already exists. Useful after changing extraction behavior.">?</span>
+          </label>
+          <div class="small">One-to-one duplicate-key filter is always enabled (if several WDC entities share a key, the richest one is kept).</div>
+        </div>
+      </div>
+    </div>
+    </div>
+    <div class="wizard-panel" data-step-panel="5">
+    <div id="form-error-box" class="warn" {% if not form_error %}style="display:none"{% endif %}>{{ form_error or "" }}</div>
+
+    <div
+      id="class-parts-info"
+      class="info"
+      {% if not class_parts_info %}style="display:none"{% endif %}
+      data-initial='{{ (class_parts_info or {}) | tojson }}'
+    >
+      <div><b id="class-parts-title"></b></div>
+      <div class="small" id="class-parts-meta"></div>
+      <div class="small" id="class-parts-downloaded"></div>
+      <div class="small" id="class-parts-missing"></div>
+    </div>
+    <div id="ready-checklist" class="info small"></div>
+    <div id="preflight-box" class="info" style="display:none"></div>
+    <div class="info small" style="margin-top:10px;">
+      <b>Before launch:</b> class selected, parts range kept small for first run, mapping rules filled, endpoint verified.
+    </div>
+    </div>
+    <div class="form-actions">
+      <button id="wizard-prev-btn" class="btn secondary" type="button">Previous</button>
+      <button id="wizard-next-btn" class="btn secondary" type="button">Next</button>
+      <button id="preflight-btn" class="btn secondary" type="button">Run preflight check</button>
+      <button class="btn primary" type="submit">Generate benchmark</button>
+    </div>
+    <div id="wizard-error-box" class="wizard-error" role="status" aria-live="polite"></div>
+  </form>
+  </section>
+
+  <div id="mapping-norm-modal" class="mapping-norm-modal" aria-hidden="true">
+    <div class="mapping-norm-modal-card">
+      <h3 style="margin-bottom:8px;">Per-Property Normalization</h3>
+      <div class="small" style="margin-bottom:8px;">Configure normalization for each pair in this combination.</div>
+      <div class="mapping-norm-modal-head mapping-norm-modal-row">
+        <div>WDC property</div>
+        <div>Target property</div>
+        <div>Search in</div>
+        <div>Normalization</div>
+      </div>
+      <div id="mapping-norm-modal-body"></div>
+      <div class="mapping-norm-modal-actions">
+        <button id="mapping-norm-cancel-btn" class="btn secondary" type="button">Cancel</button>
+        <button id="mapping-norm-save-btn" class="btn primary" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+

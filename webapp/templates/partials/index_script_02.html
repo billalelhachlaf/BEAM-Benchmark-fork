@@ -1,0 +1,850 @@
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'mapping-norm-checkbox';
+      cb.dataset.token = opt.token;
+      cb.checked = selectedKnown.has(opt.token);
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(opt.label));
+      normOptions.appendChild(label);
+    });
+    (parsed.custom || []).forEach((token) => createCustomItem(normList, token));
+    const addCustomFromInput = () => {
+      const raw = normalizeFormText(normAddInput.value);
+      if (!raw) return;
+      const existingSet = new Set(
+        Array.from(normList.querySelectorAll('.mapping-norm-custom-item-input'))
+          .map((el) => normalizeFormText(el.value).toLowerCase())
+          .filter((v) => v)
+      );
+      if (existingSet.has(raw.toLowerCase())) {
+        normAddInput.value = '';
+        return;
+      }
+      createCustomItem(normList, raw);
+      normAddInput.value = '';
+    };
+    normAddBtn.addEventListener('click', addCustomFromInput);
+    normAddInput.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      addCustomFromInput();
+    });
+    normAdd.appendChild(normAddInput);
+    normAdd.appendChild(normAddBtn);
+    normWrap.appendChild(normAdd);
+    normWrap.appendChild(normList);
+    normCell.appendChild(normOptions);
+    normCell.appendChild(normWrap);
+    rowEl.appendChild(wdcCell);
+    rowEl.appendChild(targetCell);
+    rowEl.appendChild(searchCell);
+    rowEl.appendChild(normCell);
+    body.appendChild(rowEl);
+  }
+  activeNormRow = row;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function setFieldGroupVisible(groupId, visible) {
+  const el = document.getElementById(groupId);
+  if (!el) return;
+  el.classList.toggle('hidden', !visible);
+}
+
+function inferMatchingModeFromForm() {
+  const selectedMode = normalizeMatchingMode(document.getElementById('matching-mode-select')?.value);
+  if (selectedMode) return selectedMode;
+  const pattern = normalizeFormText(document.getElementById('wdc-pattern-input')?.value).toLowerCase();
+  const prop = normalizeFormText(document.getElementById('wikidata-property-input')?.value).toLowerCase();
+  if (/(sameas|url)/i.test(pattern) && !prop) return 'sameas';
+  return 'property';
+}
+
+function applyMatchingMode(mode, fromUser = false) {
+  const select = document.getElementById('matching-mode-select');
+  const normalizedMode = normalizeMatchingMode(mode) || 'property';
+  const previousMode = inferMatchingModeFromForm();
+  if (select && select.value !== normalizedMode) {
+    select.value = normalizedMode;
+  }
+
+  const patternInput = document.getElementById('wdc-pattern-input');
+  const propInput = document.getElementById('wikidata-property-input');
+
+  if (fromUser && patternInput) {
+    const current = normalizeFormText(patternInput.value);
+    const defaultPatternByMode = {
+      property: 'name',
+      sameas: 'sameAs',
+      sameas_or_property: 'sameAs',
+    };
+    const shouldResetPattern = (
+      !current
+      || previousMode !== normalizedMode
+      || (normalizedMode === 'sameas' && !/(sameas|url)/i.test(current))
+    );
+    if (shouldResetPattern) {
+      patternInput.value = defaultPatternByMode[normalizedMode] || current;
+    }
+  }
+  syncWdcPatternRowsFromHidden();
+
+  if (fromUser && propInput) {
+    const currentProp = normalizeFormText(propInput.value);
+    if (normalizedMode === 'sameas') {
+      propInput.value = '';
+    } else {
+      const defaultPropertyByMode = {
+        property: 'rdfs:label',
+        sameas_or_property: 'rdfs:label',
+      };
+      const shouldResetProp = (!currentProp || previousMode !== normalizedMode);
+      if (shouldResetProp) {
+        propInput.value = defaultPropertyByMode[normalizedMode] || currentProp;
+      }
+    }
+  }
+
+  setFieldGroupVisible('wikidata-property-group', normalizedMode !== 'sameas');
+  setFieldGroupVisible('ignore-chars-group', normalizedMode !== 'sameas');
+
+  syncWikidataPropertyState();
+  updateMatchingGuidance();
+  updateReadyChecklist();
+}
+
+function renderChecklistItem(label, ok, detail) {
+  const cls = ok ? 'ok' : 'bad';
+  const state = ok ? 'OK' : '!';
+  return `
+    <div class="ready-item ${cls}">
+      <div>
+        <div class="label">${escapeHtml(label)}</div>
+        <div class="detail">${escapeHtml(detail)}</div>
+      </div>
+      <div class="state">${state}</div>
+    </div>
+  `;
+}
+
+function updateReadyChecklist() {
+  const box = document.getElementById('ready-checklist');
+  if (!box) return;
+
+  const className = normalizeFormText(document.getElementById('class-name-select')?.value);
+  const pattern = normalizeFormText(document.getElementById('wdc-pattern-input')?.value);
+  const patternSearchIn = normalizeFormText(document.getElementById('wdc-pattern-search-in-select')?.value) || 'predicate';
+  const propertyMappingRules = normalizeFormText(document.getElementById('property-mapping-rules-input')?.value);
+  const targetProperty = normalizeFormText(document.getElementById('wikidata-property-input')?.value);
+  const targetClass = normalizeFormText(document.getElementById('wkd-class-input')?.value);
+  const targetEndpoint = normalizeFormText(document.getElementById('target-endpoint-select')?.value) || 'wikidata';
+  const targetEndpointUrl = normalizeFormText(document.getElementById('target-endpoint-url-input')?.value);
+  const useLocalOnly = !!document.getElementById('use-local-only-checkbox')?.checked;
+  const selectedMode = normalizeMatchingMode(document.getElementById('matching-mode-select')?.value) || 'property';
+  const urlMode = selectedMode === 'sameas';
+  const includesSameAs = modeIncludesSameAs(selectedMode);
+
+  const items = [];
+  items.push({
+    label: 'Class selected',
+    ok: !!className,
+    detail: className ? className : 'Choose a class name.',
+  });
+  items.push({
+    label: 'Considered pattern set',
+    ok: !!pattern || !!propertyMappingRules,
+    detail: propertyMappingRules
+      ? 'Using property mapping rules.'
+      : (pattern ? `${pattern} (in ${patternSearchIn})` : 'Set a property pattern (example: name, sameAs, telephone).'),
+  });
+  items.push({
+    label: 'Target endpoint set',
+    ok: !!targetEndpoint && (targetEndpoint !== 'custom' || !!targetEndpointUrl),
+    detail: targetEndpoint === 'custom'
+      ? (targetEndpointUrl || 'Custom endpoint URL is required.')
+      : targetEndpoint,
+  });
+  if (includesSameAs) {
+    items.push({
+      label: 'Target class filter set',
+      ok: !!targetClass,
+      detail: targetClass ? targetClass : 'Required in sameAs mode.',
+    });
+  }
+  if (!urlMode) {
+    items.push({
+      label: 'Equivalent target property set',
+      ok: !!targetProperty || !!propertyMappingRules,
+      detail: propertyMappingRules
+        ? 'Derived from property mapping rules.'
+        : (targetProperty ? targetProperty : 'Required unless pure sameAs mode.'),
+    });
+  }
+
+  let partsOk = false;
+  let partsDetail = 'Select a class to check parts.';
+  if (className) {
+    if (!latestClassPartsInfo || String(latestClassPartsInfo.class_name || '') !== className) {
+      partsDetail = 'Checking class parts...';
+    } else {
+      const localCount = Number(latestClassPartsInfo.downloaded_parts_count || 0) + Number(latestClassPartsInfo.local_only_parts_count || 0);
+      const onlineCount = Number(latestClassPartsInfo.online_available_count || 0);
+      if (useLocalOnly) {
+        partsOk = localCount > 0;
+        partsDetail = partsOk ? `Local parts available: ${localCount}` : 'No local parts found (local-only enabled).';
+      } else {
+        partsOk = localCount > 0 || onlineCount > 0 || Number(latestClassPartsInfo.class_num_parts || 0) > 0;
+        partsDetail = partsOk ? `Local: ${localCount} | Online: ${onlineCount}` : 'No parts available locally or online.';
+      }
+    }
+  }
+  items.push({
+    label: 'Parts available',
+    ok: partsOk,
+    detail: partsDetail,
+  });
+
+  const allOk = items.every((row) => !!row.ok);
+  box.className = allOk ? 'info small' : 'warn small';
+  box.innerHTML = `
+    <div><b>Ready to run: ${allOk ? 'yes' : 'not yet'}</b></div>
+    <div class="ready-list">
+      ${items.map((row) => renderChecklistItem(row.label, row.ok, row.detail)).join('')}
+    </div>
+  `;
+}
+
+const IGNORE_CHAR_ALIAS_TO_TOKEN = {
+  spaces: 'spaces',
+  space: 'spaces',
+  '.': 'dot',
+  dot: 'dot',
+  period: 'dot',
+  ';': 'semicolon',
+  semicolon: 'semicolon',
+  semi: 'semicolon',
+  '-': 'hyphen',
+  hyphen: 'hyphen',
+  dash: 'hyphen',
+  ',': 'comma',
+  comma: 'comma',
+  '/': 'slash',
+  slash: 'slash',
+  '_': 'underscore',
+  underscore: 'underscore',
+};
+
+const IGNORE_CHAR_TOKEN_TO_SPEC = {
+  spaces: 'spaces',
+  dot: 'dot',
+  semicolon: 'semicolon',
+  hyphen: 'hyphen',
+  comma: 'comma',
+  slash: 'slash',
+  underscore: 'underscore',
+};
+
+function parseIgnoreCharsSpec(spec) {
+  const raw = String(spec || '').split(';').map((s) => String(s || '').trim()).filter(Boolean);
+  const known = [];
+  const custom = [];
+  const seenKnown = new Set();
+  const seenCustom = new Set();
+  raw.forEach((token) => {
+    const mapped = IGNORE_CHAR_ALIAS_TO_TOKEN[token.toLowerCase()] || null;
+    if (mapped) {
+      if (!seenKnown.has(mapped)) {
+        seenKnown.add(mapped);
+        known.push(mapped);
+      }
+      return;
+    }
+    if (!seenCustom.has(token)) {
+      seenCustom.add(token);
+      custom.push(token);
+    }
+  });
+  return { known, custom };
+}
+
+function getIgnoreCharsCustomList() {
+  return document.getElementById('ignore-chars-custom-list');
+}
+
+function getIgnoreCharsCustomRowInputs() {
+  return Array.from(document.querySelectorAll('.ignore-chars-custom-item-input'));
+}
+
+function resizeIgnoreCharsTokenInput(input, minChars = 4, maxChars = 24) {
+  if (!input) return;
+  const raw = String(input.value || '').trim();
+  const placeholder = String(input.placeholder || '').trim();
+  const basis = raw || placeholder || '';
+  const next = Math.min(maxChars, Math.max(minChars, basis.length + 1));
+  input.size = next;
+}
+
+function readIgnoreCharsCustomTokens() {
+  return getIgnoreCharsCustomRowInputs()
+    .map((el) => normalizeFormText(el.value))
+    .filter(Boolean);
+}
+
+function _createIgnoreCharsCustomRow(value = '') {
+  const row = document.createElement('div');
+  row.className = 'char-option ignore-chars-custom-item';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'ignore-chars-custom-item-input';
+  input.placeholder = 'token';
+  input.value = normalizeFormText(value);
+  resizeIgnoreCharsTokenInput(input, 4, 24);
+  input.addEventListener('input', () => {
+    resizeIgnoreCharsTokenInput(input, 4, 24);
+    onIgnoreCharsChanged();
+  });
+  input.addEventListener('change', () => {
+    resizeIgnoreCharsTokenInput(input, 4, 24);
+    onIgnoreCharsChanged();
+  });
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'ignore-chars-custom-remove-btn';
+  removeBtn.textContent = '×';
+  removeBtn.setAttribute('aria-label', 'Remove token');
+  removeBtn.title = 'Remove token';
+  removeBtn.addEventListener('click', () => {
+    row.remove();
+    onIgnoreCharsChanged();
+  });
+
+  row.appendChild(input);
+  row.appendChild(removeBtn);
+  return row;
+}
+
+function setIgnoreCharsCustomRows(tokens) {
+  const list = getIgnoreCharsCustomList();
+  if (!list) return;
+  list.innerHTML = '';
+  (tokens || []).forEach((token) => {
+    list.appendChild(_createIgnoreCharsCustomRow(token));
+  });
+}
+
+function addIgnoreCharsCustomRow(value = '', focus = false) {
+  const list = getIgnoreCharsCustomList();
+  if (!list) return null;
+  const row = _createIgnoreCharsCustomRow(value);
+  list.appendChild(row);
+  if (focus) {
+    const input = row.querySelector('.ignore-chars-custom-item-input');
+    if (input) input.focus();
+  }
+  return row;
+}
+
+function addIgnoreCharsCustomTokensFromInput(rawValue = '', focusLast = false) {
+  const chunks = String(rawValue || '')
+    .split(/[;\n]+/)
+    .map((s) => normalizeFormText(s))
+    .filter(Boolean);
+  if (!chunks.length) return 0;
+  const existing = new Set(readIgnoreCharsCustomTokens().map((t) => t.toLowerCase()));
+  let added = 0;
+  chunks.forEach((token, idx) => {
+    const key = token.toLowerCase();
+    if (existing.has(key)) return;
+    existing.add(key);
+    addIgnoreCharsCustomRow(token, focusLast && idx === chunks.length - 1);
+    added += 1;
+  });
+  return added;
+}
+
+function syncIgnoreCharsUiFromHidden() {
+  const hidden = document.getElementById('ignore-chars-input');
+  if (!hidden) return;
+  const { known, custom } = parseIgnoreCharsSpec(hidden.value);
+  const knownSet = new Set(known);
+  document.querySelectorAll('.ignore-char-checkbox').forEach((cb) => {
+    const token = String(cb.dataset.token || '').trim();
+    cb.checked = knownSet.has(token);
+  });
+  setIgnoreCharsCustomRows(custom);
+  const customInput = document.getElementById('ignore-chars-custom-input');
+  if (customInput) {
+    customInput.value = '';
+  }
+}
+
+function syncIgnoreCharsHiddenFromUi() {
+  const hidden = document.getElementById('ignore-chars-input');
+  if (!hidden) return;
+  const selected = [];
+  const seen = new Set();
+  document.querySelectorAll('.ignore-char-checkbox').forEach((cb) => {
+    if (!cb.checked) return;
+    const token = String(cb.dataset.token || '').trim();
+    const spec = IGNORE_CHAR_TOKEN_TO_SPEC[token] || token;
+    if (!spec || seen.has(spec)) return;
+    seen.add(spec);
+    selected.push(spec);
+  });
+  const customTokens = readIgnoreCharsCustomTokens();
+  customTokens.forEach((token) => {
+    const mapped = IGNORE_CHAR_ALIAS_TO_TOKEN[token.toLowerCase()] || token;
+    const spec = IGNORE_CHAR_TOKEN_TO_SPEC[mapped] || mapped;
+    if (!spec || seen.has(spec)) return;
+    seen.add(spec);
+    selected.push(spec);
+  });
+  hidden.value = selected.join(';');
+}
+
+function onIgnoreCharsChanged() {
+  syncIgnoreCharsHiddenFromUi();
+  updateMatchingGuidance();
+  showFormError('');
+  const preflightBox = document.getElementById('preflight-box');
+  if (preflightBox) {
+    preflightBox.dataset.risk = '';
+  }
+}
+
+function isEffectiveWikidataUrlMode() {
+  return normalizeFormText(document.getElementById('matching-mode-select')?.value).toLowerCase() === 'sameas';
+}
+
+function getSelectedTargetEndpoint() {
+  return normalizeFormText(document.getElementById('target-endpoint-select')?.value).toLowerCase() || 'wikidata';
+}
+
+function isCustomTargetEndpointSelected() {
+  return getSelectedTargetEndpoint() === 'custom';
+}
+
+function setRequiredState(inputId, starId, isRequired) {
+  const input = document.getElementById(inputId);
+  if (input) {
+    input.required = !!isRequired;
+    input.setAttribute('aria-required', isRequired ? 'true' : 'false');
+  }
+  const star = document.getElementById(starId);
+  if (star) {
+    star.classList.toggle('active', !!isRequired);
+  }
+}
+
+function updateRequiredIndicators() {
+  const selectedMode = normalizeMatchingMode(document.getElementById('matching-mode-select')?.value) || 'property';
+  const isWikidata = selectedMode === 'sameas';
+  const includesSameAs = modeIncludesSameAs(selectedMode);
+  const hasRules = !!normalizeFormText(document.getElementById('property-mapping-rules-input')?.value);
+  setRequiredState('class-name-select', 'required-class-name', true);
+  setRequiredState('wdc-pattern-input', 'required-wdc-pattern', true);
+  setRequiredState('wikidata-property-input', 'required-wikidata-property', !isWikidata && !hasRules);
+  setRequiredState('wkd-class-input', 'required-wkd-class', includesSameAs);
+  setRequiredState('target-endpoint-url-input', 'required-target-endpoint-url', isCustomTargetEndpointSelected());
+}
+
+function syncWikidataPropertyState() {
+  const isWikidata = isEffectiveWikidataUrlMode();
+  const selectedMode = normalizeMatchingMode(document.getElementById('matching-mode-select')?.value) || 'property';
+  const includesSameAs = modeIncludesSameAs(selectedMode);
+  const isCustomEndpoint = isCustomTargetEndpointSelected();
+  const propInput = document.getElementById('wikidata-property-input');
+  if (!propInput) return;
+  if (isWikidata) {
+    if (!propInput.disabled) {
+      propInput.dataset.cachedValue = propInput.value || '';
+    }
+    propInput.value = '';
+    propInput.disabled = true;
+    propInput.placeholder = 'Ignored in sameAs mode';
+  } else {
+    propInput.disabled = false;
+    if (!propInput.value && propInput.dataset.cachedValue) {
+      propInput.value = propInput.dataset.cachedValue;
+    }
+    propInput.placeholder = 'rdfs:label / P1329 / dbo:birthDate / <URI>';
+  }
+
+  const propLabel = document.getElementById('wikidata-property-label');
+  if (propLabel) {
+    propLabel.classList.toggle('field-disabled', !!isWikidata);
+  }
+
+  const endpointUrlGroup = document.getElementById('target-endpoint-url-group');
+  const endpointUrlInput = document.getElementById('target-endpoint-url-input');
+  setFieldGroupVisible('target-endpoint-url-group', isCustomEndpoint);
+  if (endpointUrlInput) {
+    endpointUrlInput.disabled = !isCustomEndpoint;
+    if (!isCustomEndpoint) {
+      endpointUrlInput.value = '';
+    }
+  }
+  if (endpointUrlGroup) {
+    endpointUrlGroup.classList.toggle('field-disabled', !isCustomEndpoint);
+  }
+
+  const ignoreCharsLabel = document.getElementById('ignore-chars-label');
+  const ignoreCharsOptions = document.getElementById('ignore-chars-options');
+  const ignoreCharsCustomPanel = document.getElementById('ignore-chars-custom-panel');
+  const ignoreCharsCustomInput = document.getElementById('ignore-chars-custom-input');
+  const ignoreCharsCustomAddBtn = document.getElementById('ignore-chars-custom-add-btn');
+  const ignoreCharsCustomRowInputs = getIgnoreCharsCustomRowInputs();
+  const ignoreCharsCustomRemoveBtns = Array.from(document.querySelectorAll('.ignore-chars-custom-remove-btn'));
+  const ignoreCharsChecks = Array.from(document.querySelectorAll('.ignore-char-checkbox'));
+  if (ignoreCharsLabel) ignoreCharsLabel.classList.toggle('field-disabled', !!isWikidata);
+  if (ignoreCharsOptions) ignoreCharsOptions.classList.toggle('field-disabled', !!isWikidata);
+  if (ignoreCharsCustomPanel) ignoreCharsCustomPanel.classList.toggle('field-disabled', !!isWikidata);
+  ignoreCharsChecks.forEach((cb) => {
+    cb.disabled = !!isWikidata;
+    cb.setAttribute('aria-disabled', isWikidata ? 'true' : 'false');
+  });
+  if (ignoreCharsCustomInput) {
+    ignoreCharsCustomInput.disabled = !!isWikidata;
+    ignoreCharsCustomInput.setAttribute('aria-disabled', isWikidata ? 'true' : 'false');
+  }
+  if (ignoreCharsCustomAddBtn) {
+    ignoreCharsCustomAddBtn.disabled = !!isWikidata;
+    ignoreCharsCustomAddBtn.setAttribute('aria-disabled', isWikidata ? 'true' : 'false');
+  }
+  ignoreCharsCustomRowInputs.forEach((input) => {
+    input.disabled = !!isWikidata;
+    input.setAttribute('aria-disabled', isWikidata ? 'true' : 'false');
+  });
+  ignoreCharsCustomRemoveBtns.forEach((btn) => {
+    btn.disabled = !!isWikidata;
+    btn.setAttribute('aria-disabled', isWikidata ? 'true' : 'false');
+  });
+
+  const modeSelect = document.getElementById('matching-mode-select');
+  if (modeSelect) {
+    const inferredMode = inferMatchingModeFromForm();
+    if (modeSelect.value !== inferredMode) {
+      modeSelect.value = inferredMode;
+    }
+  }
+
+  refreshPatternRowEndpointLabels();
+  updateRequiredIndicators();
+  updateReadyChecklist();
+}
+
+function updateMatchingGuidance() {
+  const box = document.getElementById('matching-guidance');
+  if (!box) return;
+  box.style.display = 'none';
+  box.textContent = '';
+}
+
+function validateGenerateForm(opts = {}) {
+  syncWdcPatternHiddenFromRows();
+  const requireWikidataInputs = opts.requireWikidataInputs !== false;
+  const className = normalizeFormText(document.getElementById('class-name-select')?.value);
+  const pattern = normalizeFormText(document.getElementById('wdc-pattern-input')?.value);
+  const propertyMappingRules = normalizeFormText(document.getElementById('property-mapping-rules-input')?.value);
+  const targetProperty = normalizeFormText(document.getElementById('wikidata-property-input')?.value);
+  const targetClass = normalizeFormText(document.getElementById('wkd-class-input')?.value);
+  const targetEndpoint = getSelectedTargetEndpoint();
+  const targetEndpointUrl = normalizeFormText(document.getElementById('target-endpoint-url-input')?.value);
+  const isWikidata = isEffectiveWikidataUrlMode();
+  const selectedMode = normalizeMatchingMode(document.getElementById('matching-mode-select')?.value) || 'property';
+  const includesSameAs = modeIncludesSameAs(selectedMode);
+
+  if (!className) return 'Class name is required.';
+  if (!pattern && !propertyMappingRules) return 'Considered pattern for WDC properties is required.';
+  if (targetEndpoint === 'custom' && !targetEndpointUrl) return 'Custom endpoint URL is required.';
+  if (propertyMappingRules) {
+    const lines = propertyMappingRules.split('\n').map((line) => normalizeFormText(line)).filter((line) => line);
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      const splitNorm = line.split('||');
+      const mappingText = normalizeFormText(splitNorm[0]);
+      if (!mappingText.includes('=>')) return `Invalid property mapping rule at line ${i + 1}: expected "wdc_prop => target_prop".`;
+      const parts = mappingText.split('=>');
+      if (parts.length < 2) return `Invalid property mapping rule at line ${i + 1}.`;
+      const left = parts[0].split(',').map((v) => normalizeFormText(v)).filter((v) => v);
+      const right = parts.slice(1).join('=>').split(',').map((v) => normalizeFormText(v)).filter((v) => v);
+      const metaRaw = normalizeFormText(splitNorm.slice(1).join('||'));
+      let rowMode = 'property';
+      if (metaRaw.startsWith('[')) {
+        try {
+          const decoded = JSON.parse(metaRaw);
+          if (Array.isArray(decoded) && decoded.length !== left.length) {
+            return `Invalid property mapping rule at line ${i + 1}: per-pair normalization count differs from pair count.`;
+          }
+        } catch (_) {}
+      } else if (metaRaw.startsWith('{')) {
+        try {
+          const decoded = JSON.parse(metaRaw);
+          if (decoded && typeof decoded === 'object') {
+            rowMode = normalizeFormText(decoded.mode).toLowerCase() === 'sameas' ? 'sameas' : 'property';
+            if (Array.isArray(decoded.ignore_chars) && decoded.ignore_chars.length !== left.length) {
+              return `Invalid property mapping rule at line ${i + 1}: per-pair normalization count differs from pair count.`;
+            }
+            if (Array.isArray(decoded.search_in) && decoded.search_in.length !== left.length) {
+              return `Invalid property mapping rule at line ${i + 1}: per-pair search mode count differs from pair count.`;
+            }
+          }
+        } catch (_) {}
+      }
+      if (!left.length) return `Invalid property mapping rule at line ${i + 1}: left side is required.`;
+      if (rowMode !== 'sameas') {
+        if (!right.length) return `Invalid property mapping rule at line ${i + 1}: right side is required in property mode.`;
+        if (left.length !== right.length) return `Invalid property mapping rule at line ${i + 1}: left/right counts differ.`;
+      }
+    }
+  }
+  if (!requireWikidataInputs) return '';
+  if (isWikidata) {
+    if (!targetClass) return 'Target class filter is required when using sameAs mode.';
+    return '';
+  }
+  if (includesSameAs && !targetClass) return 'Target class filter is required when sameAs mode is enabled.';
+  if (!targetProperty && !propertyMappingRules) return 'Equivalent target property is required when WDC values are not endpoint URLs.';
+  return '';
+}
+
+function renderPreflightReport(report) {
+  const box = document.getElementById('preflight-box');
+  if (!box) return;
+  if (!report || typeof report !== 'object') {
+    box.style.display = 'none';
+    box.innerHTML = '';
+    box.dataset.risk = '';
+    return;
+  }
+  const warnings = Array.isArray(report.warnings) ? report.warnings : [];
+  const samples = Array.isArray(report.sample_values) ? report.sample_values : [];
+  const files = Array.isArray(report.selected_files) ? report.selected_files : [];
+  const topUnmatched = Array.isArray(report.top_unmatched_wdc_values) ? report.top_unmatched_wdc_values : [];
+  const closeExamples = Array.isArray(report.close_wikidata_examples) ? report.close_wikidata_examples : [];
+  const topPredicates = Array.isArray(report.top_predicates) ? report.top_predicates : [];
+  const invalidEndpointValues = Array.isArray(report.invalid_wikidata_samples) ? report.invalid_wikidata_samples : [];
+  const risk = String(report.risk || 'high');
+  box.style.display = '';
+  box.className = risk === 'high' ? 'warn' : 'info';
+  box.dataset.risk = risk;
+  const warningsHtml = warnings.length
+    ? `<div class="small" style="margin-top:6px;"><b>Warnings:</b> ${escapeHtml(warnings.join(' | '))}</div>`
+    : '';
+  const samplesHtml = samples.length
+    ? `<div class="small" style="margin-top:6px;"><b>Sample values:</b> ${escapeHtml(samples.join(' | '))}</div>`
+    : '';
+  const filesHtml = files.length
+    ? `<div class="small" style="margin-top:6px;"><b>Sampled files:</b> ${escapeHtml(files.join(', '))}</div>`
+    : '';
+  const topUnmatchedHtml = topUnmatched.length
+    ? `<div class="small" style="margin-top:6px;"><b>Top WDC values (likely unmatched):</b> ${topUnmatched.map((row) => `${escapeHtml(String(row.value || ''))} (${escapeHtml(String(row.count || 0))})`).join(' | ')}</div>`
+    : '';
+  const closeExamplesHtml = closeExamples.length
+    ? `<div class="small" style="margin-top:6px;"><b>Closest target endpoint examples:</b> ${closeExamples.map((row) => `${escapeHtml(String(row.wdc_value || ''))} -> ${escapeHtml((Array.isArray(row.wikidata_candidates) ? row.wikidata_candidates.join(', ') : ''))}`).join(' | ')}</div>`
+    : '';
+  const topPredicatesHtml = topPredicates.length
+    ? `<div class="small" style="margin-top:6px;"><b>Most frequent predicates in sampled data:</b> ${topPredicates.map((row) => `${escapeHtml(String(row.predicate || ''))} (${escapeHtml(String(row.count || 0))})`).join(' | ')}</div>`
+    : '';
+  const invalidWikidataHtml = invalidEndpointValues.length
+    ? `<div class="small" style="margin-top:6px;"><b>Non-target endpoint URL samples:</b> ${escapeHtml(invalidEndpointValues.join(' | '))}</div>`
+    : '';
+  box.innerHTML = `
+    <div><b>Preflight</b> · ${escapeHtml(String(report.summary || ''))}</div>
+    <div class="small">Risk: ${escapeHtml(risk)} | Confidence: ${escapeHtml(String(report.confidence || 'low'))}</div>
+    <div class="small">Scanned lines: ${escapeHtml(String(report.scanned_lines ?? 0))} | Matched triples: ${escapeHtml(String(report.matched_triples ?? 0))} | Distinct values: ${escapeHtml(String(report.distinct_values ?? 0))}</div>
+    <div class="small">Selected files: ${escapeHtml(String(report.selected_files_count ?? 0))}</div>
+    ${report.wdc_value_is_wikidata ? `<div class="small">Target endpoint URL-like values: ${escapeHtml(String(report.wikidata_url_like ?? 0))}</div>` : ''}
+    ${warningsHtml}
+    ${samplesHtml}
+    ${filesHtml}
+    ${topUnmatchedHtml}
+    ${closeExamplesHtml}
+    ${topPredicatesHtml}
+    ${invalidWikidataHtml}
+  `;
+}
+
+async function runPreflightCheck() {
+  const error = validateGenerateForm({ requireWikidataInputs: false });
+  if (error) {
+    showFormError(error);
+    return;
+  }
+  showFormError('');
+  const preflightBtn = document.getElementById('preflight-btn');
+  if (preflightBtn) preflightBtn.disabled = true;
+  try {
+    const selectedMode = normalizeMatchingMode(document.getElementById('matching-mode-select')?.value) || 'property';
+    const effectiveWikidataMode = selectedMode === 'sameas';
+    const query = new URLSearchParams({
+      matching_mode: selectedMode,
+      class_name: normalizeFormText(document.getElementById('class-name-select')?.value),
+      parts_spec: normalizeFormText(document.getElementById('parts-spec-input')?.value) || 'all',
+      wdc_predicate_pattern: normalizeFormText(document.getElementById('wdc-pattern-input')?.value),
+      wdc_pattern_search_in: normalizeFormText(document.getElementById('wdc-pattern-search-in-select')?.value) || 'predicate',
+      property_mapping_rules: normalizeFormText(document.getElementById('property-mapping-rules-input')?.value),
+      target_endpoint: normalizeFormText(document.getElementById('target-endpoint-select')?.value) || 'wikidata',
+      target_endpoint_url: normalizeFormText(document.getElementById('target-endpoint-url-input')?.value),
+      target_prefixes: normalizeFormText(document.getElementById('target-prefixes-input')?.value),
+      target_property: normalizeFormText(document.getElementById('wikidata-property-input')?.value),
+      target_class: normalizeFormText(document.getElementById('wkd-class-input')?.value),
+      wikidata_property: normalizeFormText(document.getElementById('wikidata-property-input')?.value),
+      wkd_class: normalizeFormText(document.getElementById('wkd-class-input')?.value),
+      ignore_chars: effectiveWikidataMode ? '' : normalizeFormText(document.getElementById('ignore-chars-input')?.value),
+      use_local_only: document.getElementById('use-local-only-checkbox')?.checked ? 'true' : 'false',
+      include_wikidata_preview: 'true',
+      scan_limit_lines: '30000',
+    });
+    const res = await fetch(`/api/preflight?${query.toString()}`, {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const payload = await res.json();
+    renderPreflightReport(payload);
+  } catch (_) {
+    renderPreflightReport({
+      risk: 'high',
+      confidence: 'low',
+      summary: 'Preflight request failed.',
+      scanned_lines: 0,
+      matched_triples: 0,
+      distinct_values: 0,
+      selected_files_count: 0,
+      warnings: ['Could not reach preflight endpoint'],
+      sample_values: [],
+      selected_files: [],
+      top_unmatched_wdc_values: [],
+      close_wikidata_examples: [],
+      top_predicates: [],
+      invalid_wikidata_samples: [],
+    });
+  } finally {
+    if (preflightBtn) preflightBtn.disabled = false;
+  }
+}
+
+function showToast(message, kind = 'info', timeoutMs = 4200) {
+  const wrap = document.getElementById('toast-wrap');
+  if (!wrap || !message) return;
+  const t = document.createElement('div');
+  t.className = `toast ${kind}`;
+  t.textContent = message;
+  wrap.appendChild(t);
+  setTimeout(() => {
+    t.classList.add('hide');
+    setTimeout(() => t.remove(), 260);
+  }, timeoutMs);
+}
+
+function showPendingToastFromStorage() {
+  try {
+    const raw = sessionStorage.getItem(PENDING_TOAST_KEY);
+    if (!raw) return;
+    sessionStorage.removeItem(PENDING_TOAST_KEY);
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.message) return;
+    if (parsed.id) {
+      const lastId = sessionStorage.getItem(LAST_TOAST_ID_KEY);
+      if (lastId && lastId === String(parsed.id)) return;
+      sessionStorage.setItem(LAST_TOAST_ID_KEY, String(parsed.id));
+    }
+    if (parsed.ts && (Date.now() - Number(parsed.ts)) > 120000) return;
+    showToast(parsed.message, parsed.kind || 'info');
+  } catch (_) {}
+}
+
+function queueReloadWithToast(message, kind = 'success', buildCount = null) {
+  if (dashboardReloadQueued) return;
+  dashboardReloadQueued = true;
+  if (Number.isFinite(Number(buildCount))) {
+    lastReloadQueuedBuildCount = Math.max(lastReloadQueuedBuildCount, Number(buildCount));
+  }
+  const toastId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    sessionStorage.setItem(PENDING_TOAST_KEY, JSON.stringify({ id: toastId, message, kind, ts: Date.now() }));
+  } catch (_) {}
+  setTimeout(() => window.location.reload(), 550);
+}
+
+function ensureLaneState(jobId) {
+  if (!laneStateByJob[jobId]) {
+    laneStateByJob[jobId] = {
+      align: { lastTsMs: 0, step: '—', status: 'pending', etaText: '—' },
+      build: { lastTsMs: 0, step: '—', status: 'pending', etaText: '—' },
+    };
+  }
+  return laneStateByJob[jobId];
+}
+
+function updateLaneMeta(jobId, lane, patch) {
+  const state = ensureLaneState(jobId)[lane];
+  if (!state) return;
+  if (patch.status) state.status = patch.status;
+  if (patch.step) state.step = patch.step;
+  if (patch.tsMs) state.lastTsMs = patch.tsMs;
+  if (patch.etaText !== undefined) state.etaText = patch.etaText || '—';
+
+  const statusEl = document.getElementById(`lane-status-${lane}-${jobId}`);
+  const stepEl = document.getElementById(`lane-step-${lane}-${jobId}`);
+  const etaEl = document.getElementById(`lane-eta-${lane}-${jobId}`);
+  const lastEl = document.getElementById(`lane-last-${lane}-${jobId}`);
+  if (statusEl) statusEl.textContent = state.status || 'pending';
+  if (stepEl) stepEl.textContent = state.step || '—';
+  if (etaEl) etaEl.textContent = state.etaText || '—';
+  if (lastEl) {
+    if (!state.lastTsMs) {
+      lastEl.textContent = '—';
+      lastEl.classList.remove('stale');
+    } else {
+      const ageMs = Date.now() - state.lastTsMs;
+      lastEl.textContent = `${new Date(state.lastTsMs).toLocaleTimeString()} (${Math.max(0, Math.floor(ageMs / 1000))}s ago)`;
+      lastEl.classList.toggle('stale', ageMs > 2000);
+    }
+  }
+}
+
+function appendLogLine(box, line) {
+  if (!box || !line) return;
+  const existing = box.textContent || '';
+  const trimmedExisting = existing.replace(/\n+$/g, '');
+  const lastNl = trimmedExisting.lastIndexOf('\n');
+  const lastLine = lastNl >= 0 ? trimmedExisting.slice(lastNl + 1) : trimmedExisting;
+  if (lastLine === line) return;
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 5;
+  box.textContent += line + '\n';
+  const logLines = box.textContent.split('\n');
+  if (logLines.length > 220) {
+    box.textContent = logLines.slice(-220).join('\n');
+  }
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function formatEtaSeconds(totalSeconds) {
+  const s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${m}m ${sec}s`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
+function isZeroEtaText(value) {
+  const compact = String(value || '').trim().toLowerCase().replace(/\s+/g, '');
+  if (!compact) return false;
+  const digits = compact.match(/\d/g) || [];
+  if (digits.length === 0) return false;
+  if (!digits.every((d) => d === '0')) return false;
+  const tail = compact.replace(/[0-9:\.]/g, '');
+  return !tail || /^[hms]+$/.test(tail);
+}
+
+function extractEtaText(progressText) {
+  const txt = String(progressText || '');

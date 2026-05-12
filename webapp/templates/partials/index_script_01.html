@@ -1,0 +1,850 @@
+const activeLogSockets = {};
+const logReconnectTimers = {};
+const logPingTimers = {};
+const logWatchdogTimers = {};
+const logRetryAttempts = {};
+const logLastMessageTs = {};
+const stopReconnectByJob = {};
+const seenEventIdsByJob = {};
+const laneStateByJob = {};
+const terminalHandledByJob = {};
+const lastStatusByJob = {};
+const phaseByJob = {};
+const lastProgressLogByJob = {};
+const JOB_COLLAPSE_KEY = 'beam.minimizedJobs';
+const BUILD_COLLAPSE_KEY = 'beam.minimizedBuilds';
+const PENDING_TOAST_KEY = 'beam.pendingToast';
+const LAST_TOAST_ID_KEY = 'beam.lastToastId';
+const BUILD_STAR_KEY = 'beam.starredBuilds';
+const HISTORY_VISIBILITY_KEY = 'beam.historyVisibilityMode';
+const TERMINAL_STATUSES = new Set(['done', 'error', 'cancelled', 'interrupted']);
+let dashboardPollTimer = null;
+let dashboardPollBusy = false;
+let dashboardReloadQueued = false;
+let lastKnownBuildCount = Number({{ builds|length }});
+let nextBuildDomId = Number({{ builds|length }});
+let lastReloadQueuedBuildCount = lastKnownBuildCount;
+let latestClassPartsInfo = null;
+const DASHBOARD_TEST_MODE = {{ (1 if is_test_mode else 0) | tojson }};
+
+function getMinimizedJobs() {
+  try {
+    const raw = localStorage.getItem(JOB_COLLAPSE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function saveMinimizedJobs(map) {
+  try {
+    localStorage.setItem(JOB_COLLAPSE_KEY, JSON.stringify(map));
+  } catch (_) {}
+}
+
+function getMinimizedBuilds() {
+  try {
+    const raw = localStorage.getItem(BUILD_COLLAPSE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function getStarredBuilds() {
+  try {
+    const raw = localStorage.getItem(BUILD_STAR_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function saveStarredBuilds(map) {
+  try {
+    localStorage.setItem(BUILD_STAR_KEY, JSON.stringify(map));
+  } catch (_) {}
+}
+
+function getHistoryVisibilityMode() {
+  try {
+    const raw = String(localStorage.getItem(HISTORY_VISIBILITY_KEY) || '').trim().toLowerCase();
+    if (raw === 'starred' || raw === 'selected') return raw;
+  } catch (_) {}
+  return 'all';
+}
+
+function saveHistoryVisibilityMode(mode) {
+  try {
+    localStorage.setItem(HISTORY_VISIBILITY_KEY, String(mode || 'all'));
+  } catch (_) {}
+}
+
+function updateHistoryVisibilityButton() {
+  const btn = document.getElementById('history-visibility-toggle-btn');
+  if (!btn) return;
+  const mode = getHistoryVisibilityMode();
+  if (mode === 'starred') {
+    btn.textContent = 'Show: starred';
+  } else if (mode === 'selected') {
+    btn.textContent = 'Show: selected';
+  } else {
+    btn.textContent = 'Show: all';
+  }
+}
+
+function cycleHistoryVisibilityMode() {
+  const mode = getHistoryVisibilityMode();
+  const next = mode === 'all' ? 'starred' : (mode === 'starred' ? 'selected' : 'all');
+  saveHistoryVisibilityMode(next);
+  updateHistoryVisibilityButton();
+  applyHistorySearchFilter();
+}
+
+function bindHistoryVisibilityToggle() {
+  const btn = document.getElementById('history-visibility-toggle-btn');
+  if (!btn || btn.dataset.bound === '1') {
+    updateHistoryVisibilityButton();
+    return;
+  }
+  btn.dataset.bound = '1';
+  btn.addEventListener('click', () => {
+    cycleHistoryVisibilityMode();
+  });
+  updateHistoryVisibilityButton();
+}
+
+function saveMinimizedBuilds(map) {
+  try {
+    localStorage.setItem(BUILD_COLLAPSE_KEY, JSON.stringify(map));
+  } catch (_) {}
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function isTestClassName(value) {
+  const name = String(value || '').trim().toLowerCase();
+  if (!name) return false;
+  return name.startsWith('testclass') || name.startsWith('uxcheckclass');
+}
+
+function shouldKeepClassForMode(className) {
+  return isTestClassName(className) === !!DASHBOARD_TEST_MODE;
+}
+
+function pruneCardsForCurrentMode() {
+  document.querySelectorAll('#build-list .build').forEach((card) => {
+    const className = String(card.dataset.className || card.dataset.buildKey || '').split('::')[0];
+    if (!shouldKeepClassForMode(className)) {
+      card.remove();
+    }
+  });
+  document.querySelectorAll('.job[data-job-id]').forEach((card) => {
+    const className = card.dataset.className || '';
+    if (!shouldKeepClassForMode(className)) {
+      const jobId = Number(card.dataset.jobId || 0);
+      if (jobId > 0) {
+        closeSocketNow(jobId);
+      }
+      card.remove();
+    }
+  });
+  applyHistorySearchFilter();
+  refreshJobsEmptyState();
+}
+
+function renderClassPartsInfo(info) {
+  const box = document.getElementById('class-parts-info');
+  if (!box) return;
+  if (!info || !info.class_name) {
+    latestClassPartsInfo = null;
+    box.style.display = 'none';
+    updateReadyChecklist();
+    return;
+  }
+
+  latestClassPartsInfo = info;
+  box.style.display = '';
+  const titleEl = document.getElementById('class-parts-title');
+  const metaEl = document.getElementById('class-parts-meta');
+  const downloadedEl = document.getElementById('class-parts-downloaded');
+  const missingEl = document.getElementById('class-parts-missing');
+  const onlineErrEl = document.getElementById('class-parts-online-error');
+  const localOnlyEl = document.getElementById('class-parts-local-only');
+
+  if (titleEl) titleEl.textContent = `Class: ${info.class_name}`;
+  if (metaEl) {
+    const catalogCountRaw = Number(info.class_num_parts);
+    const hasCatalogCount = Number.isFinite(catalogCountRaw) && catalogCountRaw > 0;
+    const catalogParts = hasCatalogCount ? String(catalogCountRaw) : 'N/A';
+    const size = info.class_size_human || 'N/A';
+    const classRanges = hasCatalogCount ? `0-${Math.max(0, catalogCountRaw - 1)}` : 'unknown';
+    metaEl.textContent = `Class parts: ${classRanges} (${catalogParts} parts, ${size})`;
+  }
+  if (downloadedEl) {
+    const localRanges = [];
+    const downloadedRanges = info.downloaded_part_ranges || '—';
+    if (downloadedRanges && downloadedRanges !== '—') {
+      localRanges.push(downloadedRanges);
+    }
+    const localOnlyCount = Number(info.local_only_parts_count || 0);
+    const localOnlyRanges = info.local_only_part_numbers_text || '—';
+    if (localOnlyCount > 0 && localOnlyRanges !== '—') {
+      localRanges.push(localOnlyRanges);
+    }
+    downloadedEl.textContent = `Local parts: ${localRanges.length ? localRanges.join(', ') : 'none'}`;
+  }
+  if (missingEl) {
+    const ranges = info.online_available_ranges || '—';
+    missingEl.textContent = `Online parts: ${ranges === '—' ? 'none' : ranges}`;
+  }
+  if (onlineErrEl) {
+    onlineErrEl.style.display = 'none';
+    onlineErrEl.textContent = '';
+  }
+  if (localOnlyEl) {
+    localOnlyEl.style.display = 'none';
+    localOnlyEl.textContent = '';
+  }
+  updateReadyChecklist();
+}
+
+async function refreshClassPartsInfo(className) {
+  const selected = String(className || '').trim();
+  if (!selected) {
+    renderClassPartsInfo(null);
+    return;
+  }
+  try {
+    const res = await fetch(`/api/class_parts/${encodeURIComponent(selected)}`, {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const payload = await res.json();
+    renderClassPartsInfo(payload);
+  } catch (_) {
+    renderClassPartsInfo({
+      class_name: selected,
+      class_num_parts: null,
+      class_size_human: null,
+      online_available_count: 0,
+      online_available_ranges: '—',
+      online_discovered_count: 0,
+      online_discovered_ranges: '—',
+      online_inferred_from_catalog: false,
+      downloaded_parts_count: 0,
+      downloaded_part_ranges: '—',
+      downloaded_part_numbers_text: '—',
+      not_downloaded_online_parts_count: 0,
+      not_downloaded_online_part_ranges: '—',
+      not_downloaded_online_part_numbers_text: '—',
+      online_error: 'request failed',
+      local_only_parts_count: 0,
+      local_only_part_numbers_text: '—',
+    });
+  }
+}
+
+function showFormError(message) {
+  const box = document.getElementById('form-error-box');
+  if (!box) return;
+  const txt = String(message || '').trim();
+  if (!txt) {
+    box.style.display = 'none';
+    box.textContent = '';
+    return;
+  }
+  box.style.display = '';
+  box.textContent = txt;
+}
+
+function normalizeFormText(value) {
+  return String(value || '').trim();
+}
+
+function normalizeMatchingMode(value) {
+  const mode = normalizeFormText(value).toLowerCase();
+  if (['property', 'sameas', 'sameas_or_property'].includes(mode)) return mode;
+  return '';
+}
+
+function modeIncludesSameAs(mode) {
+  const normalized = normalizeMatchingMode(mode);
+  return normalized === 'sameas' || normalized === 'sameas_or_property';
+}
+
+function parseWdcPatternSpec(value) {
+  const raw = String(value || '')
+    .split(/[\n,;]+/)
+    .map((s) => normalizeFormText(s))
+    .filter(Boolean);
+  return raw;
+}
+
+function formatWdcPatternSpec(tokens) {
+  return (tokens || []).map((t) => normalizeFormText(t)).filter(Boolean).join(', ');
+}
+
+function getWdcPatternHiddenInput() {
+  return document.getElementById('wdc-pattern-input');
+}
+
+function getWdcPatternList() {
+  return document.getElementById('wdc-pattern-list');
+}
+
+function getWdcPatternRowInputs() {
+  return Array.from(document.querySelectorAll('.mapping-wdc-input'));
+}
+
+function getTargetPropertyRowInputs() {
+  return Array.from(document.querySelectorAll('.mapping-target-input'));
+}
+
+function getPropertyMappingRulesInput() {
+  return document.getElementById('property-mapping-rules-input');
+}
+
+function parsePropertyList(value) {
+  return String(value || '')
+    .split(',')
+    .map((v) => normalizeFormText(v))
+    .filter((v) => v);
+}
+
+function getRowPairNorms(row) {
+  if (!row) return [];
+  const raw = String(row.dataset.pairNorms || '').trim();
+  if (!raw) return [];
+  try {
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data)) return [];
+    return data.map((v) => normalizeFormText(v));
+  } catch (_) {
+    return [];
+  }
+}
+
+function getRowPairSearchModes(row) {
+  if (!row) return [];
+  const raw = String(row.dataset.pairSearchIn || '').trim();
+  if (!raw) return [];
+  try {
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data)) return [];
+    return data.map((v) => {
+      const mode = normalizeFormText(v).toLowerCase();
+      return mode === 'value' ? 'value' : 'predicate';
+    });
+  } catch (_) {
+    return [];
+  }
+}
+
+function setRowPairNorms(row, norms) {
+  if (!row) return;
+  const cleaned = (Array.isArray(norms) ? norms : [])
+    .map((v) => normalizeFormText(v));
+  row.dataset.pairNorms = JSON.stringify(cleaned);
+}
+
+function setRowPairSearchModes(row, modes) {
+  if (!row) return;
+  const cleaned = (Array.isArray(modes) ? modes : []).map((v) => {
+    const mode = normalizeFormText(v).toLowerCase();
+    return mode === 'value' ? 'value' : 'predicate';
+  });
+  row.dataset.pairSearchIn = JSON.stringify(cleaned);
+}
+
+function updateRowNormSummary(row) {
+  if (!row) return;
+  const summary = row.querySelector('.pattern-row-norm-summary');
+  if (!summary) return;
+  const norms = getRowPairNorms(row).filter((v) => v);
+  const modes = getRowPairSearchModes(row).filter((v) => v === 'value');
+  if (!norms.length && !modes.length) {
+    summary.textContent = 'No per-property override';
+    return;
+  }
+  const parts = [];
+  if (norms.length) parts.push(`${norms.length} normalization override(s)`);
+  if (modes.length) parts.push(`${modes.length} value-scope override(s)`);
+  summary.textContent = parts.join(' | ');
+}
+
+function syncWdcPatternRemoveButtons() {
+  const list = getWdcPatternList();
+  if (!list) return;
+  const rows = Array.from(list.querySelectorAll('.pattern-row'));
+  const canRemove = rows.length > 1;
+  rows.forEach((row) => {
+    const removeBtn = row.querySelector('.pattern-row-remove');
+    if (!removeBtn) return;
+    removeBtn.disabled = !canRemove;
+    removeBtn.setAttribute('aria-disabled', !canRemove ? 'true' : 'false');
+    removeBtn.title = canRemove
+      ? 'Remove this pattern'
+      : 'Add another pattern before removing this one.';
+  });
+}
+
+function readWdcPatternRows() {
+  return getWdcPatternRowInputs()
+    .map((el) => normalizeFormText(el.value))
+    .filter(Boolean);
+}
+
+function syncWdcPatternHiddenFromRows() {
+  const hidden = getWdcPatternHiddenInput();
+  const rulesHidden = getPropertyMappingRulesInput();
+  const primaryTargetProperty = document.getElementById('wikidata-property-input');
+  if (!hidden || !rulesHidden) return [];
+  const leftInputs = getWdcPatternRowInputs();
+  const rightInputs = getTargetPropertyRowInputs();
+  const rows = Array.from(document.querySelectorAll('.pattern-row'));
+  const leftTokens = [];
+  const rules = [];
+  const firstRightTokens = [];
+  for (let i = 0; i < leftInputs.length; i += 1) {
+    const left = normalizeFormText(leftInputs[i]?.value);
+    const right = normalizeFormText(rightInputs[i]?.value);
+    const rowModeRaw = normalizeFormText(rows[i]?.dataset?.linkingMode).toLowerCase();
+    const rowMode = rowModeRaw === 'sameas' ? 'sameas' : 'property';
+    const leftItems = parsePropertyList(left);
+    const rightItems = parsePropertyList(right);
+    if (left) leftTokens.push(left);
+    if (right) firstRightTokens.push(right);
+    const rowShapeOk = rowMode === 'sameas'
+      ? !!leftItems.length
+      : (leftItems.length && rightItems.length && leftItems.length === rightItems.length);
+    if (rowShapeOk) {
+      const pairNorms = getRowPairNorms(rows[i]);
+      const pairSearchIn = getRowPairSearchModes(rows[i]);
+      const paddedNorms = [];
+      const paddedSearchIn = [];
+      for (let j = 0; j < leftItems.length; j += 1) {
+        paddedNorms.push(normalizeFormText(pairNorms[j] || ""));
+        const mode = normalizeFormText(pairSearchIn[j] || 'predicate').toLowerCase();
+        paddedSearchIn.push(mode === 'value' ? 'value' : 'predicate');
+      }
+      const hasNormOverrides = paddedNorms.some((v) => v);
+      const hasSearchOverrides = paddedSearchIn.some((v) => v === 'value');
+      let normPayload = "";
+      if (hasNormOverrides || hasSearchOverrides || rowMode === 'sameas') {
+        const meta = {
+          mode: rowMode,
+          ignore_chars: paddedNorms,
+          search_in: paddedSearchIn,
+        };
+        normPayload = JSON.stringify(meta);
+      }
+      const row = rowMode === 'sameas' ? `${left} =>` : `${left} => ${right}`;
+      rules.push(normPayload ? `${row} || ${normPayload}` : row);
+    }
+  }
+  hidden.value = formatWdcPatternSpec(leftTokens);
+  rulesHidden.value = rules.join('\n');
+  if (primaryTargetProperty) {
+    primaryTargetProperty.value = firstRightTokens.length ? firstRightTokens[0] : '';
+  }
+  return leftTokens;
+}
+
+function onWdcPatternRowsChanged() {
+  const modeSelect = document.getElementById('matching-mode-select');
+  if (modeSelect) {
+    const rows = Array.from(document.querySelectorAll('.pattern-row'));
+    const hasSameAs = rows.some((row) => normalizeFormText(row.dataset.linkingMode).toLowerCase() === 'sameas');
+    const hasProperty = rows.some((row) => normalizeFormText(row.dataset.linkingMode).toLowerCase() !== 'sameas');
+    const desiredMode = hasSameAs && hasProperty ? 'sameas_or_property' : (hasSameAs ? 'sameas' : 'property');
+    if (normalizeMatchingMode(modeSelect.value) !== desiredMode) {
+      modeSelect.value = desiredMode;
+    }
+  }
+  refreshPatternRowEndpointLabels();
+  syncWdcPatternRemoveButtons();
+  syncWdcPatternHiddenFromRows();
+  syncWikidataPropertyState();
+  updateMatchingGuidance();
+  showFormError('');
+  const preflightBox = document.getElementById('preflight-box');
+  if (preflightBox) {
+    preflightBox.dataset.risk = '';
+  }
+}
+
+function getEndpointPatternLabel() {
+  const endpoint = getSelectedTargetEndpoint();
+  const labels = {
+    wikidata: 'Wikidata pattern',
+    dbpedia: 'DBpedia pattern',
+    yago: 'YAGO pattern',
+    custom: 'Endpoint pattern',
+  };
+  return labels[endpoint] || 'Endpoint pattern';
+}
+
+function refreshPatternRowEndpointLabels() {
+  const text = getEndpointPatternLabel();
+  document.querySelectorAll('.mapping-target-label').forEach((el) => {
+    el.textContent = text;
+  });
+}
+
+function _createWdcPatternRow(value = '') {
+  const initial = value && typeof value === 'object'
+    ? {
+      left: normalizeFormText(value.left),
+      right: normalizeFormText(value.right),
+      norm: normalizeFormText(value.norm),
+      pairNorms: Array.isArray(value.pairNorms) ? value.pairNorms : [],
+      pairSearchIn: Array.isArray(value.pairSearchIn) ? value.pairSearchIn : [],
+      mode: normalizeFormText(value.mode).toLowerCase() === 'sameas' ? 'sameas' : 'property',
+    }
+    : { left: normalizeFormText(value), right: '', norm: '', pairNorms: [], pairSearchIn: [], mode: 'property' };
+  const row = document.createElement('div');
+  row.className = 'pattern-row';
+  row.dataset.linkingMode = initial.mode;
+  const main = document.createElement('div');
+  main.className = 'pattern-row-main';
+
+  const modeSelect = document.createElement('select');
+  modeSelect.className = 'mapping-search-scope-select pattern-row-mode-select';
+  modeSelect.innerHTML = '<option value="property">property</option><option value="sameas">sameAs</option>';
+  modeSelect.value = initial.mode;
+  modeSelect.addEventListener('change', () => {
+    row.dataset.linkingMode = modeSelect.value === 'sameas' ? 'sameas' : 'property';
+    const sameasMode = row.dataset.linkingMode === 'sameas';
+    rightInput.disabled = sameasMode;
+    rightInput.placeholder = sameasMode ? 'Ignored in sameAs mode' : 'p123,p124,p135';
+    if (sameasMode) {
+      rightInput.value = '';
+    }
+    configBtn.disabled = sameasMode;
+    summary.textContent = sameasMode ? 'Not used in sameAs mode' : 'No per-property override';
+    if (!sameasMode) updateRowNormSummary(row);
+    onWdcPatternRowsChanged();
+  });
+  const modeWrap = document.createElement('div');
+  modeWrap.className = 'mapping-col';
+  const modeLabel = document.createElement('span');
+  modeLabel.className = 'mapping-col-label';
+  modeLabel.textContent = 'Linking mode';
+  modeWrap.appendChild(modeLabel);
+  modeWrap.appendChild(modeSelect);
+
+  const leftInput = document.createElement('input');
+  leftInput.type = 'text';
+  leftInput.className = 'mapping-wdc-input';
+  leftInput.placeholder = 'WDC properties (e.g. name,iata)';
+  leftInput.value = initial.left;
+  leftInput.addEventListener('input', onWdcPatternRowsChanged);
+  leftInput.addEventListener('change', onWdcPatternRowsChanged);
+  const leftWrap = document.createElement('div');
+  leftWrap.className = 'mapping-col';
+  const leftLabel = document.createElement('span');
+  leftLabel.className = 'mapping-col-label';
+  leftLabel.textContent = 'WDC pattern';
+  leftWrap.appendChild(leftLabel);
+  leftWrap.appendChild(leftInput);
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'pattern-row-remove';
+  removeBtn.textContent = 'Remove';
+  removeBtn.addEventListener('click', () => {
+    if (getWdcPatternRowInputs().length <= 1) {
+      syncWdcPatternRemoveButtons();
+      return;
+    }
+    row.remove();
+    ensureWdcPatternRowsNotEmpty();
+    onWdcPatternRowsChanged();
+  });
+
+  const sep = document.createElement('span');
+  sep.className = 'mapping-separator';
+  sep.textContent = ':';
+
+  const rightInput = document.createElement('input');
+  rightInput.type = 'text';
+  rightInput.className = 'mapping-target-input';
+  rightInput.placeholder = 'Endpoint properties (e.g. P238 or dbo:isbn)';
+  rightInput.value = initial.right;
+  rightInput.addEventListener('input', onWdcPatternRowsChanged);
+  rightInput.addEventListener('change', onWdcPatternRowsChanged);
+  const rightWrap = document.createElement('div');
+  rightWrap.className = 'mapping-col';
+  const rightLabel = document.createElement('span');
+  rightLabel.className = 'mapping-col-label mapping-target-label';
+  rightLabel.textContent = getEndpointPatternLabel();
+  rightWrap.appendChild(rightLabel);
+  rightWrap.appendChild(rightInput);
+
+  const normRow = document.createElement('div');
+  normRow.className = 'pattern-row-norm';
+
+  const normLabel = document.createElement('span');
+  normLabel.className = 'pattern-row-norm-label';
+  normLabel.textContent = 'Normalization';
+
+  const configBtn = document.createElement('button');
+  configBtn.type = 'button';
+  configBtn.className = 'pattern-row-norm-config-btn';
+  configBtn.textContent = 'Per-property...';
+  configBtn.addEventListener('click', () => {
+    openRowNormModal(row);
+  });
+
+  const summary = document.createElement('span');
+  summary.className = 'pattern-row-norm-summary';
+  summary.textContent = 'No per-property override';
+
+  main.appendChild(leftWrap);
+  main.appendChild(sep);
+  main.appendChild(rightWrap);
+  main.appendChild(modeWrap);
+  main.appendChild(removeBtn);
+  normRow.appendChild(normLabel);
+  normRow.appendChild(configBtn);
+  normRow.appendChild(summary);
+  row.appendChild(main);
+  row.appendChild(normRow);
+  const initialPairNorms = (Array.isArray(initial.pairNorms) && initial.pairNorms.length)
+    ? initial.pairNorms
+    : (initial.norm ? [initial.norm] : []);
+  setRowPairNorms(row, initialPairNorms);
+  setRowPairSearchModes(row, Array.isArray(initial.pairSearchIn) ? initial.pairSearchIn : []);
+  if (initial.mode === 'sameas') {
+    rightInput.disabled = true;
+    rightInput.placeholder = 'Ignored in sameAs mode';
+    configBtn.disabled = true;
+    summary.textContent = 'Not used in sameAs mode';
+  } else {
+    updateRowNormSummary(row);
+  }
+  refreshPatternRowEndpointLabels();
+  return row;
+}
+
+function ensureWdcPatternRowsNotEmpty() {
+  const list = getWdcPatternList();
+  if (!list) return;
+  if (getWdcPatternRowInputs().length === 0) {
+    list.appendChild(_createWdcPatternRow(''));
+  }
+  syncWdcPatternRemoveButtons();
+}
+
+function addWdcPatternRow(value = '', focus = false) {
+  const list = getWdcPatternList();
+  if (!list) return;
+  const row = _createWdcPatternRow(value);
+  list.appendChild(row);
+  if (focus) {
+    const input = row.querySelector('.mapping-wdc-input');
+    if (input) input.focus();
+  }
+  onWdcPatternRowsChanged();
+}
+
+function syncWdcPatternRowsFromHidden() {
+  const list = getWdcPatternList();
+  const hidden = getWdcPatternHiddenInput();
+  const rulesHidden = getPropertyMappingRulesInput();
+  const fallbackTarget = normalizeFormText(document.getElementById('wikidata-property-input')?.value);
+  if (!list || !hidden || !rulesHidden) return;
+  const tokens = parseWdcPatternSpec(hidden.value);
+  const rows = [];
+  const fallbackNorm = normalizeFormText(document.getElementById('ignore-chars-input')?.value);
+  const rawRules = String(rulesHidden.value || '')
+    .split('\n')
+    .map((line) => normalizeFormText(line))
+    .filter((line) => line && line.includes('=>'));
+  rawRules.forEach((line) => {
+    const splitNorm = line.split('||');
+    const mappingText = normalizeFormText(splitNorm[0]);
+    const rawNorm = normalizeFormText(splitNorm.slice(1).join('||'));
+    let norm = rawNorm;
+    let pairNorms = [];
+    let pairSearchIn = [];
+    let mode = 'property';
+    if (rawNorm.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(rawNorm);
+        if (Array.isArray(parsed)) {
+          pairNorms = parsed.map((v) => normalizeFormText(v));
+          norm = normalizeFormText(pairNorms.find((v) => v) || '');
+        }
+      } catch (_) {}
+    } else if (rawNorm.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(rawNorm);
+        if (parsed && typeof parsed === 'object') {
+          if (normalizeFormText(parsed.mode).toLowerCase() === 'sameas') {
+            mode = 'sameas';
+          }
+          const parsedNorms = Array.isArray(parsed.ignore_chars) ? parsed.ignore_chars : [];
+          pairNorms = parsedNorms.map((v) => normalizeFormText(v));
+          const parsedModes = Array.isArray(parsed.search_in) ? parsed.search_in : [];
+          pairSearchIn = parsedModes.map((v) => (normalizeFormText(v).toLowerCase() === 'value' ? 'value' : 'predicate'));
+          norm = normalizeFormText(pairNorms.find((v) => v) || '');
+        }
+      } catch (_) {}
+    }
+    const parts = mappingText.split('=>');
+    const left = normalizeFormText(parts[0]);
+    const right = normalizeFormText(parts.slice(1).join('=>'));
+    if (left && (right || mode === 'sameas')) rows.push({ left, right, norm, pairNorms, pairSearchIn, mode });
+  });
+  if (!rows.length && tokens.length) {
+    tokens.forEach((token) => rows.push({ left: token, right: fallbackTarget, norm: fallbackNorm }));
+  }
+  list.innerHTML = '';
+  if (!rows.length) {
+    list.appendChild(_createWdcPatternRow({ left: '', right: fallbackTarget, norm: fallbackNorm }));
+  } else {
+    rows.forEach((row) => {
+      list.appendChild(_createWdcPatternRow(row));
+    });
+  }
+  syncWdcPatternRemoveButtons();
+  syncWdcPatternHiddenFromRows();
+}
+
+let activeNormRow = null;
+
+function createModalNormCustomItem(value = '') {
+  const item = document.createElement('div');
+  item.className = 'mapping-norm-custom-item';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'mapping-norm-custom-item-input';
+  input.value = normalizeFormText(value);
+  input.placeholder = 'token';
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'mapping-norm-custom-remove-btn';
+  removeBtn.textContent = '×';
+  removeBtn.addEventListener('click', () => item.remove());
+  item.appendChild(input);
+  item.appendChild(removeBtn);
+  return item;
+}
+
+function readModalNormSpec(rowEl) {
+  if (!rowEl) return '';
+  const selected = [];
+  const seen = new Set();
+  rowEl.querySelectorAll('.mapping-norm-checkbox').forEach((cb) => {
+    if (!cb.checked) return;
+    const raw = normalizeFormText(cb.dataset.token);
+    const token = IGNORE_CHAR_TOKEN_TO_SPEC[raw] || raw;
+    if (!token || seen.has(token)) return;
+    seen.add(token);
+    selected.push(token);
+  });
+  rowEl.querySelectorAll('.mapping-norm-custom-item-input').forEach((input) => {
+    const raw = normalizeFormText(input.value);
+    if (!raw) return;
+    const mapped = IGNORE_CHAR_ALIAS_TO_TOKEN[raw.toLowerCase()] || raw;
+    const token = IGNORE_CHAR_TOKEN_TO_SPEC[mapped] || mapped;
+    if (!token || seen.has(token)) return;
+    seen.add(token);
+    selected.push(token);
+  });
+  return selected.join(';');
+}
+
+function openRowNormModal(row) {
+  const modal = document.getElementById('mapping-norm-modal');
+  const body = document.getElementById('mapping-norm-modal-body');
+  if (!modal || !body || !row) return;
+  const rowMode = normalizeFormText(row.dataset.linkingMode).toLowerCase();
+  if (rowMode === 'sameas') {
+    showFormError('Per-property normalization is not used in sameAs mode.');
+    return;
+  }
+  const left = normalizeFormText(row.querySelector('.mapping-wdc-input')?.value);
+  const right = normalizeFormText(row.querySelector('.mapping-target-input')?.value);
+  const leftItems = parsePropertyList(left);
+  const rightItems = parsePropertyList(right);
+  if (!leftItems.length || leftItems.length !== rightItems.length) {
+    showFormError('Per-property normalization requires aligned combinations (x,y,z : p1,p2,p3).');
+    return;
+  }
+  const baseNorm = normalizeFormText(document.getElementById('ignore-chars-input')?.value);
+  const existing = getRowPairNorms(row);
+  const existingSearchModes = getRowPairSearchModes(row);
+  const globalSearchIn = normalizeFormText(document.getElementById('wdc-pattern-search-in-select')?.value).toLowerCase() === 'value'
+    ? 'value'
+    : 'predicate';
+  body.innerHTML = '';
+  const tokenDefs = [
+    { token: 'spaces', label: 'spaces' },
+    { token: 'dot', label: '.' },
+    { token: 'semicolon', label: ';' },
+    { token: 'hyphen', label: '-' },
+    { token: 'comma', label: ',' },
+    { token: 'slash', label: '/' },
+    { token: 'underscore', label: '_' },
+  ];
+
+  const createCustomItem = (container, value = '') => {
+    container.appendChild(createModalNormCustomItem(value));
+  };
+
+  for (let i = 0; i < leftItems.length; i += 1) {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'mapping-norm-modal-row';
+    rowEl.dataset.pairIndex = String(i);
+    const wdcCell = document.createElement('div');
+    wdcCell.textContent = leftItems[i];
+    const targetCell = document.createElement('div');
+    targetCell.textContent = rightItems[i];
+    const searchCell = document.createElement('div');
+    const searchSelect = document.createElement('select');
+    searchSelect.className = 'mapping-search-scope-select';
+    searchSelect.innerHTML = '<option value="predicate">property</option><option value="value">value</option>';
+    const selectedSearchIn = normalizeFormText(existingSearchModes[i] || globalSearchIn).toLowerCase();
+    searchSelect.value = selectedSearchIn === 'value' ? 'value' : 'predicate';
+    searchCell.appendChild(searchSelect);
+    const normCell = document.createElement('div');
+    normCell.className = 'mapping-norm-modal-cell';
+    const normOptions = document.createElement('div');
+    normOptions.className = 'mapping-norm-options';
+    const normWrap = document.createElement('div');
+    normWrap.className = 'mapping-norm-custom';
+    const normAdd = document.createElement('div');
+    normAdd.className = 'mapping-norm-custom-add';
+    const normAddInput = document.createElement('input');
+    normAddInput.type = 'text';
+    normAddInput.className = 'mapping-norm-custom-add-input';
+    normAddInput.placeholder = 'Additional token to remove';
+    const normAddBtn = document.createElement('button');
+    normAddBtn.type = 'button';
+    normAddBtn.className = 'mapping-norm-custom-add-btn';
+    normAddBtn.textContent = '+';
+    const normList = document.createElement('div');
+    normList.className = 'mapping-norm-custom-list';
+
+    const selectedSpec = normalizeFormText(existing[i] || baseNorm);
+    const parsed = parseIgnoreCharsSpec(selectedSpec);
+    const selectedKnown = new Set(parsed.known || []);
+    tokenDefs.forEach((opt) => {
+      const label = document.createElement('label');
+      label.className = 'mapping-norm-option';

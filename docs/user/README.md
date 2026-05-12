@@ -6,11 +6,12 @@ Primary in-app entrypoint:
 ## Recommended Reading Order
 
 1. In-app `/tutorial`
-2. [tutorial.md](tutorial.md)
-3. [recipes.md](recipes.md)
-4. [results_interpretation.md](results_interpretation.md)
-5. [faq.md](faq.md)
-6. [../limits.md](../limits.md)
+2. [guide_de_demarrage.md](guide_de_demarrage.md)
+3. [tutorial.md](tutorial.md)
+4. [recipes.md](recipes.md)
+5. [results_interpretation.md](results_interpretation.md)
+6. [faq.md](faq.md)
+7. [../limits.md](../limits.md)
 
 ## User Objectives
 

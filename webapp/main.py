@@ -660,16 +660,15 @@ def _validate_and_normalize_job_params(raw_params: dict):
     effective_includes_sameas = includes_sameas or rules_include_sameas
     effective_includes_property = includes_property if not parsed_rules else rules_include_property
 
+    if not params["target_class"]:
+        return params, "Target class filter is required."
+
     if mode == "sameas" and not parsed_rules:
         params["target_property"] = ""
         params["wikidata_property"] = ""
         params["ignore_chars"] = ""
         params["property_mapping_rules"] = ""
-        if not params["target_class"]:
-            return params, "Target class filter is required when using sameAs mode."
     else:
-        if effective_includes_sameas and not params["target_class"]:
-            return params, "Target class filter is required when sameAs mode is enabled."
         if not params["wdc_predicate_pattern"] and not parsed_rules:
             return params, "Considered pattern for WDC properties is required."
         if effective_includes_property and not params["ignore_chars"]:
@@ -1593,6 +1592,76 @@ def _sakey_write_report_files(run_id: str, summary: dict, keys_rows):
     return rep_json, rep_tsv
 
 
+def _sakey_fallback_discover_keys(nt_path: Path, out_path: Path):
+    subjects = {}
+    with nt_path.open("r", encoding="utf-8", errors="ignore") as f:
+        for raw in f:
+            line = _clean_text(raw)
+            if not line:
+                continue
+            parts = line.split(" ", 2)
+            if len(parts) < 3:
+                continue
+            subj = _clean_text(parts[0])
+            pred = _normalize_prop_iri(parts[1])
+            obj = _clean_text(parts[2])
+            if not subj or not pred or not obj:
+                continue
+            subjects.setdefault(subj, {}).setdefault(pred, []).append(obj)
+
+    subject_count = len(subjects)
+    prop_support = Counter()
+    prop_value_sets = {}
+    for prop_map in subjects.values():
+        for pred, values in prop_map.items():
+            prop_support[pred] += 1
+            joined = " | ".join(sorted(set(values)))
+            prop_value_sets.setdefault(pred, []).append(joined)
+
+    keys_rows = []
+    for pred, value_rows in prop_value_sets.items():
+        support = int(prop_support.get(pred, 0) or 0)
+        if support <= 0:
+            continue
+        if len(set(value_rows)) != support:
+            continue
+        coverage = (float(support) / float(subject_count)) if subject_count else 0.0
+        keys_rows.append(
+            {
+                "key": pred,
+                "condition": "almost_key",
+                "type": "almost_key",
+                "support": str(support),
+                "support_num": support,
+                "coverage": f"{coverage:.4f}",
+                "coverage_num": coverage,
+                "key_size": 1,
+                "score": f"{coverage:.4f}",
+                "props": [pred],
+            }
+        )
+
+    keys_rows.sort(
+        key=lambda row: (
+            -float(row.get("coverage_num", 0.0) or 0.0),
+            -float(row.get("support_num", 0.0) or 0.0),
+            _clean_text(str(row.get("key", ""))).lower(),
+        )
+    )
+    summary = {
+        "conditional_keys_count": 0,
+        "keys_count": len(keys_rows),
+        "non_keys_found": 0,
+    }
+    with out_path.open("w", encoding="utf-8", errors="ignore") as f:
+        f.write("Fallback SAKEY runner used (external runner not found)\n")
+        f.write(f"We found {len(keys_rows)} key(s)\n")
+        f.write("key\tcondition\tsupport\tscore\n")
+        for row in keys_rows:
+            f.write(f"{row['key']}\t{row['condition']}\t{row['support']}\t{row['score']}\n")
+    return summary, keys_rows
+
+
 def _run_sakey_worker(run_id: str):
     meta = _sakey_read_meta(run_id) or {}
     class_name = _clean_text(str(meta.get("class_name", "")))
@@ -1637,27 +1706,30 @@ def _run_sakey_worker(run_id: str):
 
             sakey_root = (Path(__file__).resolve().parents[1] / "SAKEY").resolve()
             runner = sakey_root / "run_sakey.sh"
-            if not runner.exists():
-                raise RuntimeError("SAKEY runner not found: SAKEY/run_sakey.sh")
-            _sakey_log(run_id, "Running SAKEY")
-            with out_path.open("w", encoding="utf-8", errors="ignore") as fout:
-                subprocess.run(
-                    [
-                        "bash",
-                        str(runner),
-                        str(nt_path),
-                        str(mins),
-                    ],
-                    cwd=str(sakey_root),
-                    check=True,
-                    text=True,
-                    stdout=fout,
-                    stderr=subprocess.STDOUT,
-                    timeout=timeout_sec,
-                )
-            _sakey_log(run_id, f"SAKEY done. Output: {out_path}")
+            if runner.exists():
+                _sakey_log(run_id, "Running SAKEY")
+                with out_path.open("w", encoding="utf-8", errors="ignore") as fout:
+                    subprocess.run(
+                        [
+                            "bash",
+                            str(runner),
+                            str(nt_path),
+                            str(mins),
+                        ],
+                        cwd=str(sakey_root),
+                        check=True,
+                        text=True,
+                        stdout=fout,
+                        stderr=subprocess.STDOUT,
+                        timeout=timeout_sec,
+                    )
+                _sakey_log(run_id, f"SAKEY done. Output: {out_path}")
+                key_summary, keys_rows = _sakey_parse_keys_from_output(out_path)
+            else:
+                _sakey_log(run_id, "SAKEY runner not found; using built-in fallback.")
+                key_summary, keys_rows = _sakey_fallback_discover_keys(nt_path, out_path)
+                _sakey_log(run_id, f"Fallback SAKEY done. Output: {out_path}")
 
-            key_summary, keys_rows = _sakey_parse_keys_from_output(out_path)
             metrics = _sakey_compute_row_metrics(nt_path, keys_rows)
             key_summary = dict(key_summary or {})
             key_summary["subjects_count_sample"] = metrics.get("subjects")

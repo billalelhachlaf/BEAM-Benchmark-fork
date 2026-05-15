@@ -1113,29 +1113,42 @@ def parse_parts_spec(parts_spec, available_parts=None):
     """Parse la spécification des parts (all, 0-3, 0,1,2)"""
     if parts_spec.lower() == "all":
         return available_parts or []
-    
+
+    available_by_number = None
+    if available_parts is not None:
+        available_by_number = {}
+        for part in available_parts:
+            m = re.search(r'part_0*(\d+)\.gz$', str(part or ''))
+            if not m:
+                continue
+            available_by_number[int(m.group(1))] = part
+
+    def add_part(number):
+        part_num = int(str(number).strip())
+        part_file = f"part_{part_num}.gz"
+        if available_by_number is not None:
+            matched = available_by_number.get(part_num)
+            if matched is not None:
+                selected.append(matched)
+        elif available_parts is None or part_file in available_parts:
+            selected.append(part_file)
+
     selected = []
     
     # Range: 0-3
     if '-' in parts_spec:
         start, end = map(int, parts_spec.split('-'))
         for i in range(start, end + 1):
-            part_file = f"part_{i}.gz"
-            if available_parts is None or part_file in available_parts:
-                selected.append(part_file)
+            add_part(i)
     
     # Liste: 0,1,2
     elif ',' in parts_spec:
         for num in parts_spec.split(','):
-            part_file = f"part_{num.strip()}.gz"
-            if available_parts is None or part_file in available_parts:
-                selected.append(part_file)
+            add_part(num)
     
     # Single: 0
     else:
-        part_file = f"part_{parts_spec}.gz"
-        if available_parts is None or part_file in available_parts:
-            selected.append(part_file)
+        add_part(parts_spec)
     
     return selected
 

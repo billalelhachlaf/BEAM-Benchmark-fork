@@ -32,6 +32,10 @@ WIKIDATA_QUERY_TIMEOUT=300
 docker compose up -d --build
 ```
 
+This uses the deployment/default runtime:
+- no source bind mount
+- multi-worker web server
+
 Then check health:
 
 ```bash
@@ -41,6 +45,12 @@ docker compose exec webapp bash scripts/check_health.sh
 Open:
 - `http://127.0.0.1`
 - `http://<server-ip>`
+
+For developer hot reload instead:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
 
 ## 5. Stop / Restart
 

@@ -2,16 +2,28 @@ services:
   webapp:
     image: beam-benchmark-fork:latest
     build: .
-    command: python -m uvicorn webapp.main:app --host 0.0.0.0 --port 8501 --reload
+    command:
+      - python
+      - -m
+      - uvicorn
+      - webapp.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8501"
+      - --workers
+      - "${WEBAPP_WORKERS:-2}"
     environment:
       WEBAPP_HOST: 0.0.0.0
       WEBAPP_PORT: 8501
+      WEBAPP_WORKERS: ${WEBAPP_WORKERS:-2}
+      WEBAPP_DASHBOARD_THREADS: ${WEBAPP_DASHBOARD_THREADS:-8}
+      WEBAPP_IO_THREADS: ${WEBAPP_IO_THREADS:-12}
       SAKEY_MAX_CONCURRENT: ${SAKEY_MAX_CONCURRENT:-1}
       PREFLIGHT_WIKIDATA_TIMEOUT: ${PREFLIGHT_WIKIDATA_TIMEOUT:-25}
     ports:
       - "8501:8501"
     volumes:
-      - ./:/app
       - ./docker-data:/state
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8501/"]
@@ -23,6 +35,7 @@ services:
 
   worker:
     image: beam-benchmark-fork:latest
+    build: .
     command: python -m worker.run
     environment:
       MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-2}

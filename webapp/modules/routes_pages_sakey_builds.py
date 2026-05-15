@@ -11,11 +11,12 @@ def _render_index_page(
     form_error: Optional[str] = None,
     test_mode: Optional[str] = None,
 ):
+    started_at = time.perf_counter()
     is_test_mode = _bool_from_any(test_mode)
     # Seed from local catalog first. Do not auto-scrape remote stats on startup.
     if not db.list_wdc_classes():
         _seed_wdc_classes_from_local_catalog()
-    local_rows = _discover_local_class_rows("Download")
+    local_rows = _get_local_class_rows_cached("Download")
     if local_rows:
         try:
             db.upsert_wdc_classes(local_rows)
@@ -55,7 +56,7 @@ def _render_index_page(
         class_parts_info = _build_class_parts_info(form["class_name"])
 
     recent_presets = _get_recent_presets(test_mode=is_test_mode)
-    dashboard = _build_dashboard_state(job_limit=50, build_limit=200, test_mode=is_test_mode)
+    dashboard = _get_dashboard_state_cached(job_limit=50, build_limit=200, test_mode=is_test_mode)
     jobs = dashboard["jobs_for_panel"]
     builds = dashboard["builds"]
     jobs_outputs = {j["id"]: dashboard["jobs_outputs"][j["id"]] for j in jobs}
@@ -63,7 +64,7 @@ def _render_index_page(
     jobs_params = {j["id"]: dashboard["jobs_params"][j["id"]] for j in jobs}
     jobs_subjobs = {j["id"]: dashboard["jobs_subjobs"][j["id"]] for j in jobs}
 
-    return templates.TemplateResponse(
+    resp = templates.TemplateResponse(
         request,
         "index.html",
         {
@@ -88,65 +89,129 @@ def _render_index_page(
             ],
         },
     )
+    _webapp_log_timing("render-index", started_at, view=app_view, test_mode=is_test_mode, classes=len(wdc_classes))
+    return resp
+
+
+def _render_sakey_page(
+    request: Request,
+    class_name: str = "",
+    run_id: str = "",
+    key_order_by: str = "",
+    key_min_support: str = "",
+    key_only_almost: Optional[str] = None,
+    key_max_size: str = "",
+    key_q: str = "",
+    test_mode: Optional[str] = None,
+    form_error: Optional[str] = None,
+):
+    is_test_mode = _bool_from_any(test_mode)
+    if not db.list_wdc_classes():
+        _seed_wdc_classes_from_local_catalog()
+    local_rows = _get_local_class_rows_cached("Download")
+    if local_rows:
+        try:
+            db.upsert_wdc_classes(local_rows)
+        except Exception:
+            pass
+    payload = _sakey_page_payload(
+        class_name=class_name,
+        run_id=run_id,
+        test_mode=is_test_mode,
+        key_order_by=key_order_by,
+        key_min_support=key_min_support,
+        key_only_almost=key_only_almost,
+        key_max_size=key_max_size,
+        key_q=key_q,
+    )
+    return templates.TemplateResponse(
+        request,
+        "sakey.html",
+        {
+            "is_test_mode": is_test_mode,
+            "form_error": _clean_text(form_error),
+            **payload,
+        },
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
-def index(
+async def index(
     request: Request,
     preset: Optional[str] = None,
     recent: Optional[int] = None,
     form_error: Optional[str] = None,
     test_mode: Optional[str] = None,
 ):
-    return _render_index_page(
-        request=request,
-        app_view="create",
-        preset=preset,
-        recent=recent,
-        form_error=form_error,
-        test_mode=test_mode,
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _WEBAPP_DASHBOARD_EXECUTOR,
+        partial(
+            _render_index_page,
+            request=request,
+            app_view="create",
+            preset=preset,
+            recent=recent,
+            form_error=form_error,
+            test_mode=test_mode,
+        ),
     )
 
 
 @app.get("/app/create", response_class=HTMLResponse)
-def app_create(
+async def app_create(
     request: Request,
     preset: Optional[str] = None,
     recent: Optional[int] = None,
     form_error: Optional[str] = None,
     test_mode: Optional[str] = None,
 ):
-    return _render_index_page(
-        request=request,
-        app_view="create",
-        preset=preset,
-        recent=recent,
-        form_error=form_error,
-        test_mode=test_mode,
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _WEBAPP_DASHBOARD_EXECUTOR,
+        partial(
+            _render_index_page,
+            request=request,
+            app_view="create",
+            preset=preset,
+            recent=recent,
+            form_error=form_error,
+            test_mode=test_mode,
+        ),
     )
 
 
 @app.get("/app/jobs", response_class=HTMLResponse)
-def app_jobs(
+async def app_jobs(
     request: Request,
     test_mode: Optional[str] = None,
 ):
-    return _render_index_page(
-        request=request,
-        app_view="jobs",
-        test_mode=test_mode,
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _WEBAPP_DASHBOARD_EXECUTOR,
+        partial(
+            _render_index_page,
+            request=request,
+            app_view="jobs",
+            test_mode=test_mode,
+        ),
     )
 
 
 @app.get("/app/history", response_class=HTMLResponse)
-def app_history(
+async def app_history(
     request: Request,
     test_mode: Optional[str] = None,
 ):
-    return _render_index_page(
-        request=request,
-        app_view="history",
-        test_mode=test_mode,
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _WEBAPP_DASHBOARD_EXECUTOR,
+        partial(
+            _render_index_page,
+            request=request,
+            app_view="history",
+            test_mode=test_mode,
+        ),
     )
 
 
@@ -172,7 +237,7 @@ def tutorial_page(
 
 
 @app.get("/sakey", response_class=HTMLResponse)
-def sakey_page(
+async def sakey_page(
     request: Request,
     class_name: str = "",
     run_id: str = "",
@@ -184,34 +249,22 @@ def sakey_page(
     test_mode: Optional[str] = None,
     form_error: Optional[str] = None,
 ):
-    is_test_mode = _bool_from_any(test_mode)
-    if not db.list_wdc_classes():
-        _seed_wdc_classes_from_local_catalog()
-    local_rows = _discover_local_class_rows("Download")
-    if local_rows:
-        try:
-            db.upsert_wdc_classes(local_rows)
-        except Exception:
-            pass
-    payload = _sakey_page_payload(
-        class_name=class_name,
-        run_id=run_id,
-        test_mode=is_test_mode,
-        key_order_by=key_order_by,
-        key_min_support=key_min_support,
-        key_only_almost=key_only_almost,
-        key_max_size=key_max_size,
-        key_q=key_q,
-    )
-
-    return templates.TemplateResponse(
-        request,
-        "sakey.html",
-        {
-            "is_test_mode": is_test_mode,
-            "form_error": _clean_text(form_error),
-            **payload,
-        },
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _WEBAPP_IO_EXECUTOR,
+        partial(
+            _render_sakey_page,
+            request=request,
+            class_name=class_name,
+            run_id=run_id,
+            key_order_by=key_order_by,
+            key_min_support=key_min_support,
+            key_only_almost=key_only_almost,
+            key_max_size=key_max_size,
+            key_q=key_q,
+            test_mode=test_mode,
+            form_error=form_error,
+        ),
     )
 
 
@@ -486,10 +539,19 @@ def build_link_node_api(
 
 
 @app.get("/api/dashboard")
-def dashboard_api(job_limit: int = 80, build_limit: int = 200, test_mode: Optional[bool] = None):
+async def dashboard_api(job_limit: int = 80, build_limit: int = 200, test_mode: Optional[bool] = None):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _WEBAPP_DASHBOARD_EXECUTOR,
+        partial(_dashboard_api_sync, job_limit=job_limit, build_limit=build_limit, test_mode=test_mode),
+    )
+
+
+def _dashboard_api_sync(job_limit: int = 80, build_limit: int = 200, test_mode: Optional[bool] = None):
+    started_at = time.perf_counter()
     job_limit = max(1, min(int(job_limit), 200))
     build_limit = max(1, min(int(build_limit), 200))
-    dashboard = _build_dashboard_state(job_limit=job_limit, build_limit=build_limit, test_mode=test_mode)
+    dashboard = _get_dashboard_state_cached(job_limit=job_limit, build_limit=build_limit, test_mode=test_mode)
 
     jobs = []
     for j in dashboard["all_jobs"]:
@@ -524,7 +586,7 @@ def dashboard_api(job_limit: int = 80, build_limit: int = 200, test_mode: Option
             }
         )
 
-    return {
+    payload = {
         "server_ts": time.time(),
         "job_count": len(jobs),
         "active_job_count": len(dashboard["active_jobs"]),
@@ -535,5 +597,5 @@ def dashboard_api(job_limit: int = 80, build_limit: int = 200, test_mode: Option
         "jobs": jobs,
         "builds": builds,
     }
-
-
+    _webapp_log_timing("api-dashboard", started_at, jobs=len(jobs), builds=len(builds), test_mode=test_mode)
+    return payload

@@ -4,7 +4,7 @@ def class_parts_api(class_name: str):
 
 
 @app.get("/api/preflight")
-def preflight_api(
+async def preflight_api(
     class_name: str,
     parts_spec: str = "all",
     matching_mode: str = "property",
@@ -23,24 +23,29 @@ def preflight_api(
     include_wikidata_preview: bool = True,
     scan_limit_lines: int = 30000,
 ):
-    return _build_preflight_report(
-        class_name=class_name,
-        parts_spec=parts_spec,
-        matching_mode=matching_mode,
-        wdc_predicate_pattern=wdc_predicate_pattern,
-        wdc_pattern_search_in=wdc_pattern_search_in,
-        target_endpoint=target_endpoint,
-        target_endpoint_url=target_endpoint_url,
-        target_prefixes=target_prefixes,
-        property_mapping_rules=property_mapping_rules,
-        target_property=target_property,
-        target_class=target_class,
-        wikidata_property=wikidata_property,
-        wkd_class=wkd_class,
-        ignore_chars=ignore_chars,
-        use_local_only=bool(use_local_only),
-        include_wikidata_preview=bool(include_wikidata_preview),
-        scan_limit_lines=int(scan_limit_lines),
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _WEBAPP_IO_EXECUTOR,
+        partial(
+            _build_preflight_report,
+            class_name=class_name,
+            parts_spec=parts_spec,
+            matching_mode=matching_mode,
+            wdc_predicate_pattern=wdc_predicate_pattern,
+            wdc_pattern_search_in=wdc_pattern_search_in,
+            target_endpoint=target_endpoint,
+            target_endpoint_url=target_endpoint_url,
+            target_prefixes=target_prefixes,
+            property_mapping_rules=property_mapping_rules,
+            target_property=target_property,
+            target_class=target_class,
+            wikidata_property=wikidata_property,
+            wkd_class=wkd_class,
+            ignore_chars=ignore_chars,
+            use_local_only=bool(use_local_only),
+            include_wikidata_preview=bool(include_wikidata_preview),
+            scan_limit_lines=int(scan_limit_lines),
+        ),
     )
 
 
@@ -58,6 +63,7 @@ def cancel_job(job_id: int):
         db.update_subjob_by_type(job_id, "align", status="cancelled", ended_at=time.time())
         db.update_subjob_by_type(job_id, "build", status="cancelled", ended_at=time.time())
     db.insert_event(job_id, "system", "Cancel requested (job)")
+    _invalidate_dashboard_cache()
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -92,6 +98,7 @@ def cancel_subjob(job_id: int, subjob_type: str):
             db.update_subjob_by_type(job_id, "build", status="cancelled", ended_at=time.time())
         else:
             db.update_subjob_by_type(job_id, "build", status="cancelled", ended_at=time.time())
+    _invalidate_dashboard_cache()
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -107,6 +114,7 @@ def rerun_job(job_id: int):
     # Always enforce one-to-one behavior in reruns.
     params["strict_duplicate_key_filter"] = True
     db.insert_job(params)
+    _invalidate_dashboard_cache()
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -125,6 +133,7 @@ def rerun_job_nocache(job_id: int):
     params["skip_build"] = False
     params.pop("require_cached_align", None)
     db.insert_job(params)
+    _invalidate_dashboard_cache()
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -141,6 +150,7 @@ def rerun_align(job_id: int):
     params["strict_duplicate_key_filter"] = True
     params["skip_build"] = True
     db.insert_job(params)
+    _invalidate_dashboard_cache()
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -158,6 +168,7 @@ def rerun_build(job_id: int):
     params["require_cached_align"] = True
     params["skip_build"] = False
     db.insert_job(params)
+    _invalidate_dashboard_cache()
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -170,6 +181,7 @@ def delete_job(job_id: int):
     if job["status"] in {"running", "queued"}:
         return RedirectResponse(url="/", status_code=303)
     db.delete_job(job_id)
+    _invalidate_dashboard_cache()
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -184,6 +196,7 @@ def delete_stopped_jobs():
             db.delete_job(int(row["id"]))
         except Exception:
             continue
+    _invalidate_dashboard_cache()
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -229,16 +242,20 @@ def create_job(
     if validation_error:
         return RedirectResponse(url=f"/?form_error={quote_plus(validation_error)}", status_code=303)
     db.insert_job(params)
+    _invalidate_dashboard_cache()
     return RedirectResponse(url="/", status_code=303)
 
 
 @app.get("/refresh_classes")
-def refresh_classes():
+async def refresh_classes():
     try:
-        _refresh_wdc_classes_from_remote()
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(_WEBAPP_IO_EXECUTOR, _refresh_wdc_classes_from_remote)
     except Exception as exc:
         msg = f"Class refresh failed; local cache/catalog kept unchanged. ({exc})"
         return RedirectResponse(url=f"/?form_error={quote_plus(msg)}", status_code=303)
+    _invalidate_dashboard_cache()
+    _invalidate_local_class_rows_cache()
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -368,6 +385,7 @@ def delete_build(class_name: str, build_name: str):
     except Exception:
         pass
     shutil.rmtree(build_dir, ignore_errors=True)
+    _invalidate_dashboard_cache()
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -404,6 +422,7 @@ def purge_low_link_builds(max_links: int = Form(10)):
             pass
         shutil.rmtree(build_dir, ignore_errors=True)
         purged += 1
+    _invalidate_dashboard_cache()
     return RedirectResponse(url=f"/?purged={purged}", status_code=303)
 
 
@@ -418,6 +437,7 @@ def rerun_build_from_build_card(class_name: str, build_name: str):
             msg = f"Cannot rerun build: {validation_error}"
             return RedirectResponse(url=f"/?form_error={quote_plus(msg)}", status_code=303)
         db.insert_job(params)
+        _invalidate_dashboard_cache()
     except Exception as exc:
         msg = f"Cannot rerun build: {exc}"
         return RedirectResponse(url=f"/?form_error={quote_plus(msg)}", status_code=303)

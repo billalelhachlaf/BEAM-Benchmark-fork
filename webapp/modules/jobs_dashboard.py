@@ -1,4 +1,71 @@
 
+import copy
+
+
+_DASHBOARD_CACHE = {}
+_DASHBOARD_CACHE_LOCK = Lock()
+_DASHBOARD_CACHE_TTL_S = max(0.0, float(os.getenv("DASHBOARD_CACHE_TTL_S", "3.0") or "3.0"))
+_DASHBOARD_TIMING_LOG_MS = max(0.0, float(os.getenv("WEBAPP_TIMING_LOG_MS", "250") or "250"))
+
+
+def _webapp_log_timing(label: str, started_at: float, **fields):
+    try:
+        elapsed_ms = (time.perf_counter() - float(started_at)) * 1000.0
+    except Exception:
+        return
+    if elapsed_ms < _DASHBOARD_TIMING_LOG_MS:
+        return
+    extras = []
+    for key, value in fields.items():
+        if value is None:
+            continue
+        extras.append(f"{key}={value}")
+    suffix = f" {' '.join(extras)}" if extras else ""
+    print(f"[webapp-timing] {label} {elapsed_ms:.1f}ms{suffix}")
+
+
+def _invalidate_dashboard_cache():
+    with _DASHBOARD_CACHE_LOCK:
+        _DASHBOARD_CACHE.clear()
+
+
+def _get_dashboard_state_cached(job_limit: int = 50, build_limit: int = 200, test_mode: Optional[bool] = None):
+    job_limit = max(1, int(job_limit or 50))
+    build_limit = max(1, int(build_limit or 200))
+    test_mode_norm = None if test_mode is None else bool(test_mode)
+    ttl_s = float(_DASHBOARD_CACHE_TTL_S)
+    if ttl_s <= 0:
+        started_at = time.perf_counter()
+        payload = _build_dashboard_state(job_limit=job_limit, build_limit=build_limit, test_mode=test_mode_norm)
+        _webapp_log_timing(
+            "dashboard-cache-bypass",
+            started_at,
+            jobs=job_limit,
+            builds=build_limit,
+            test_mode=test_mode_norm,
+        )
+        return payload
+
+    key = (job_limit, build_limit, test_mode_norm)
+    now = time.time()
+    with _DASHBOARD_CACHE_LOCK:
+        cached = _DASHBOARD_CACHE.get(key)
+        if cached and (now - float(cached.get("ts", 0.0) or 0.0)) <= ttl_s:
+            return copy.deepcopy(cached["payload"])
+
+    started_at = time.perf_counter()
+    payload = _build_dashboard_state(job_limit=job_limit, build_limit=build_limit, test_mode=test_mode_norm)
+    _webapp_log_timing(
+        "dashboard-rebuild",
+        started_at,
+        jobs=job_limit,
+        builds=build_limit,
+        test_mode=test_mode_norm,
+    )
+    with _DASHBOARD_CACHE_LOCK:
+        _DASHBOARD_CACHE[key] = {"ts": now, "payload": copy.deepcopy(payload)}
+    return payload
+
 
 def _build_result_path_aliases(build_dir: Path):
     aliases = set()
@@ -157,6 +224,7 @@ def _looks_like_skipped_build_reason(text: Optional[str]) -> bool:
 
 
 def _build_dashboard_state(job_limit: int = 50, build_limit: int = 200, test_mode: Optional[bool] = None):
+    started_at = time.perf_counter()
     all_jobs = [dict(j) for j in db.list_jobs(limit=job_limit)]
     jobs_by_id = {j["id"]: j for j in all_jobs}
     # Always include truly active jobs even if they are outside the recency window.
@@ -266,7 +334,7 @@ def _build_dashboard_state(job_limit: int = 50, build_limit: int = 200, test_mod
                 pass
         jobs_for_panel.append(j)
 
-    return {
+    payload = {
         "all_jobs": all_jobs,
         "active_jobs": active_jobs,
         "jobs_for_panel": jobs_for_panel,
@@ -276,5 +344,13 @@ def _build_dashboard_state(job_limit: int = 50, build_limit: int = 200, test_mod
         "jobs_params": jobs_params,
         "jobs_subjobs": jobs_subjobs,
     }
-
-
+    _webapp_log_timing(
+        "dashboard-state",
+        started_at,
+        all_jobs=len(all_jobs),
+        active_jobs=len(active_jobs),
+        visible_jobs=len(jobs_for_panel),
+        builds=len(builds),
+        test_mode=test_mode,
+    )
+    return payload

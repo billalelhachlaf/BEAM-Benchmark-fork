@@ -152,6 +152,7 @@ def _format_link_source_stats(stats: dict):
 
 
 def _scan_builds(limit=30):
+    started_at = time.perf_counter()
     builds = []
     root = Path("data")
     if not root.exists():
@@ -173,6 +174,7 @@ def _scan_builds(limit=30):
         builds = builds[: int(limit)]
     for b in builds:
         b.pop("sort_ts", None)
+    _webapp_log_timing("scan-builds", started_at, candidates=len(candidates), returned=len(builds), limit=limit)
     return builds
 
 
@@ -507,5 +509,4 @@ def _build_summary_from_dir(base: Path):
     build["linking_elements_text"] = ", ".join(linking_elements)
     build["sakey"] = _collect_sakey_insights(base)
     return build
-
 

@@ -1,6 +1,7 @@
 import importlib
 import io
 import json
+import time
 import zipfile
 from pathlib import Path
 
@@ -793,6 +794,63 @@ def test_create_job_does_not_block_high_risk_preflight(monkeypatch, test_wdc_cla
     assert len(jobs) == 1
 
 
+def test_sakey_run_completes_with_builtin_fallback_on_dummy_class(monkeypatch):
+    classes = [
+        {"class_name": "ValidationClass", "num_parts": 1, "size_human": "1 KB"},
+    ]
+    client, web_main = _client_with_test_classes(monkeypatch, classes)
+    class_dir = Path("Download") / "ValidationClass"
+    class_dir.mkdir(parents=True, exist_ok=True)
+    (class_dir / "part_0001.nq").write_text(
+        "<https://example.org/e1> <http://schema.org/name> \"Alpha City\" .\n"
+        "<https://example.org/e2> <http://schema.org/name> \"Beta City\" .\n"
+        "<https://example.org/e3> <http://schema.org/name> \"Gamma City\" .\n"
+        "<https://example.org/e1> <http://schema.org/sameAs> <https://www.wikidata.org/wiki/Q90> .\n"
+        "<https://example.org/e2> <http://schema.org/sameAs> <https://www.wikidata.org/entity/Q64> .\n",
+        encoding="utf-8",
+    )
+
+    with client:
+        resp = client.post(
+            "/sakey/run",
+            data={
+                "class_name": "ValidationClass",
+                "parts_spec": "1",
+                "mins": "1",
+                "timeout_hours": "0.1",
+            },
+            follow_redirects=False,
+        )
+
+    assert resp.status_code == 303
+    location = resp.headers.get("location") or ""
+    assert "run_id=" in location
+    run_id = location.split("run_id=", 1)[1].split("&", 1)[0]
+
+    deadline = time.time() + 5.0
+    meta = None
+    while time.time() < deadline:
+        meta = web_main._sakey_read_meta(run_id)
+        if meta and str(meta.get("status", "")).lower() in {"completed", "error", "timeout"}:
+            break
+        time.sleep(0.05)
+
+    assert meta is not None
+    assert meta["status"] == "completed"
+    assert meta["selected_parts_count"] == 1
+    assert int(meta.get("keys_candidates_count", 0) or 0) >= 1
+
+    report_path = Path(str(meta.get("report_json", "")))
+    out_path = Path(str(meta.get("output_path", "")))
+    assert report_path.exists()
+    assert out_path.exists()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    keys = report.get("keys_candidates") or []
+    assert keys
+    assert any("schema.org/name" in " ".join(row.get("props") or []) for row in keys)
+    assert "Fallback SAKEY runner used" in out_path.read_text(encoding="utf-8")
+
+
 def test_builds_render_and_download(monkeypatch, test_wdc_classes):
     client, web_main = _client_with_test_classes(monkeypatch, test_wdc_classes)
     build_name = "beam_20260212_120000"
@@ -938,4 +996,3 @@ def test_build_without_done_marker_is_hidden_and_inaccessible(monkeypatch, test_
     assert detail.status_code == 303
     assert links_page.status_code == 303
     assert links_api.status_code == 404
-

@@ -55,17 +55,35 @@ Expected:
 
 ## Dev Mode (Hot Reload, no rebuild per code change)
 
-The default compose setup supports hot reload for `webapp`:
-- bind mount: `./:/app`
-- server command: `uvicorn ... --reload`
-
-Start/restart:
+Use the dev override:
 
 ```bash
-docker compose up -d webapp
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
-Then edit code on host and refresh browser (no image rebuild needed for UI/Python changes).
+This enables:
+- bind mount: `./:/app`
+- web hot reload: `uvicorn ... --reload`
+
+Then edit code on host and refresh browser.
+
+## Deployment Mode
+
+The base `docker-compose.yml` is the deployment runtime:
+- no source bind mount
+- web served with multiple workers
+
+```bash
+docker compose up -d --build
+```
+
+Optional tuning:
+
+```bash
+WEBAPP_WORKERS=2
+WEBAPP_DASHBOARD_THREADS=8
+WEBAPP_IO_THREADS=12
+```
 
 ## Fast Troubleshooting
 

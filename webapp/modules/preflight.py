@@ -427,6 +427,35 @@ def _build_preflight_report(
     return report
 
 
+_LOCAL_CLASS_ROWS_CACHE = {}
+_LOCAL_CLASS_ROWS_CACHE_LOCK = Lock()
+_LOCAL_CLASS_ROWS_CACHE_TTL_S = max(0.0, float(os.getenv("LOCAL_CLASS_ROWS_CACHE_TTL_S", "5.0") or "5.0"))
+
+
+def _invalidate_local_class_rows_cache():
+    with _LOCAL_CLASS_ROWS_CACHE_LOCK:
+        _LOCAL_CLASS_ROWS_CACHE.clear()
+
+
+def _get_local_class_rows_cached(download_root: str = "Download"):
+    root_key = _clean_text(download_root) or "Download"
+    ttl_s = float(_LOCAL_CLASS_ROWS_CACHE_TTL_S)
+    if ttl_s <= 0:
+        return _discover_local_class_rows(download_root)
+    now = time.time()
+    with _LOCAL_CLASS_ROWS_CACHE_LOCK:
+        cached = _LOCAL_CLASS_ROWS_CACHE.get(root_key)
+        if cached and (now - float(cached.get("ts", 0.0) or 0.0)) <= ttl_s:
+            return [dict(row) for row in (cached.get("rows") or [])]
+    rows = _discover_local_class_rows(download_root)
+    with _LOCAL_CLASS_ROWS_CACHE_LOCK:
+        _LOCAL_CLASS_ROWS_CACHE[root_key] = {
+            "ts": now,
+            "rows": [dict(row) for row in rows],
+        }
+    return rows
+
+
 def _discover_local_class_rows(download_root: str = "Download"):
     root = Path(download_root)
     if not root.exists() or not root.is_dir():
@@ -648,5 +677,4 @@ def _build_class_parts_info(class_name: str):
         "local_only_part_numbers": local_only_numbers,
         "local_only_part_numbers_text": _format_part_list(local_only_numbers),
     }
-
 

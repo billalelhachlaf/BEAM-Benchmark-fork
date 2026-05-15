@@ -480,6 +480,28 @@ def test_delete_stopped_jobs_keeps_only_active(monkeypatch, test_wdc_classes):
     assert web_main.db.get_job(cancelled_id) is None
 
 
+def test_dashboard_cache_invalidated_after_build_delete(monkeypatch, test_wdc_classes):
+    client, _web_main = _client_with_test_classes(monkeypatch, test_wdc_classes)
+    build_name = "beam_20260515_cache_delete"
+    build_root = Path("data") / "TestClass" / build_name
+    _make_build_tree(build_root)
+
+    with client:
+        first = client.get("/api/dashboard?test_mode=1")
+        assert first.status_code == 200
+        first_payload = first.json()
+        assert any(b["build_name"] == build_name for b in first_payload["builds"])
+
+        deleted = client.post(f"/builds/TestClass/{build_name}/delete", follow_redirects=False)
+        assert deleted.status_code == 303
+
+        second = client.get("/api/dashboard?test_mode=1")
+
+    assert second.status_code == 200
+    second_payload = second.json()
+    assert all(b["build_name"] != build_name for b in second_payload["builds"])
+
+
 def test_dashboard_api_keeps_failed_job_visible_when_no_build_output(monkeypatch, test_wdc_classes):
     client, web_main = _client_with_test_classes(monkeypatch, test_wdc_classes)
 

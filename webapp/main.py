@@ -12,7 +12,7 @@ import subprocess
 from collections import Counter, OrderedDict
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pathlib import Path
-from functools import lru_cache
+from functools import lru_cache, partial
 from threading import Lock, Thread, Semaphore
 from typing import Optional
 from urllib.parse import urljoin, quote_plus, quote
@@ -59,6 +59,14 @@ _SAKEY_EXEC_SEMAPHORE = Semaphore(_SAKEY_MAX_CONCURRENT)
 _SAKEY_RECONCILE_LOCK = Lock()
 _SAKEY_RECONCILED = False
 _SAKEY_APP_BOOT_TS = time.time()
+_WEBAPP_DASHBOARD_EXECUTOR = ThreadPoolExecutor(
+    max_workers=max(2, int(os.getenv("WEBAPP_DASHBOARD_THREADS", "8") or "8")),
+    thread_name_prefix="dashboard",
+)
+_WEBAPP_IO_EXECUTOR = ThreadPoolExecutor(
+    max_workers=max(2, int(os.getenv("WEBAPP_IO_THREADS", "12") or "12")),
+    thread_name_prefix="webapp-io",
+)
 
 
 PRESETS = {

@@ -42,6 +42,34 @@
       return `${text.slice(0, 37)}...${text.slice(-38)}`;
     }
 
+    const PREFIX_RULES = [
+      ['http://www.w3.org/2000/01/rdf-schema#', 'rdfs:'],
+      ['http://www.w3.org/1999/02/22-rdf-syntax-ns#', 'rdf:'],
+      ['http://www.w3.org/2002/07/owl#', 'owl:'],
+      ['http://schema.org/', 'schema:'],
+      ['https://schema.org/', 'schema:'],
+      ['http://www.wikidata.org/prop/direct/', 'wdt:'],
+      ['http://www.wikidata.org/prop/statement/', 'ps:'],
+      ['http://www.wikidata.org/prop/qualifier/', 'pq:'],
+      ['http://www.wikidata.org/prop/', 'p:'],
+      ['http://www.wikidata.org/entity/', 'wd:'],
+      ['https://www.wikidata.org/entity/', 'wd:'],
+    ];
+
+    function toPrefixedProperty(value, fallbackShort = '') {
+      const raw = String(value || '').trim();
+      if (!raw) return String(fallbackShort || '').trim();
+      if (raw.startsWith('_:')) return raw;
+      if (/^[a-z][a-z0-9_-]*:[^/].*$/i.test(raw)) return raw;
+      for (const [base, prefix] of PREFIX_RULES) {
+        if (raw.startsWith(base)) {
+          const suffix = raw.slice(base.length).trim();
+          return suffix ? `${prefix}${suffix}` : raw;
+        }
+      }
+      return raw;
+    }
+
     function buildUrl(path, params) {
       const query = new URLSearchParams();
       Object.entries(params || {}).forEach(([k, v]) => {
@@ -199,7 +227,10 @@
       if (!nodeData) return [];
       const push = (items) => {
         (Array.isArray(items) ? items : []).forEach((it) => {
-          const prop = String(it && (it.short_property || it.property) || '').trim();
+          const prop = toPrefixedProperty(
+            String(it && it.property || '').trim(),
+            String(it && it.short_property || '').trim(),
+          );
           if (!prop) return;
           const key = prop.toLowerCase();
           let row = byKey.get(key);
@@ -295,8 +326,14 @@
       const rightByProp = propMap(rightRows);
 
       matches.forEach((m) => {
-        const left = String(m.wdc_short_property || m.wdc_property || '').trim();
-        const right = String(m.wikidata_short_property || m.wikidata_property || '').trim();
+        const left = toPrefixedProperty(
+          String(m.wdc_property || '').trim(),
+          String(m.wdc_short_property || '').trim(),
+        );
+        const right = toPrefixedProperty(
+          String(m.wikidata_property || '').trim(),
+          String(m.wikidata_short_property || '').trim(),
+        );
         const leftKey = left.toLowerCase();
         const rightKey = right.toLowerCase();
         if (left) matchedLeft.add(leftKey);
@@ -428,7 +465,10 @@
       const rows = Array.isArray(items) ? items : [];
       if (rows.length === 0) return '<div class="tree-state">None</div>';
       return rows.map((item) => {
-        const prop = String(item && (item.short_property || item.property) || '').trim();
+        const prop = toPrefixedProperty(
+          String(item && item.property || '').trim(),
+          String(item && item.short_property || '').trim(),
+        );
         const title = propertyTitle(prop, item.property_label || '', item.property_description || '');
         return `
           <div class="tree-prop">

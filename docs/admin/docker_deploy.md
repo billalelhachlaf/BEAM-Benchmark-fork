@@ -57,6 +57,9 @@ You can override runtime settings with shell variables or a local `.env` file.
 Common values:
 
 ```bash
+WEBAPP_WORKERS=2
+WEBAPP_DASHBOARD_THREADS=8
+WEBAPP_IO_THREADS=12
 MAX_CONCURRENT_JOBS=2
 JOB_POLL_INTERVAL=1
 MAX_WORKERS_PER_JOB=8
@@ -71,6 +74,10 @@ Then restart:
 ```bash
 docker compose up -d
 ```
+
+Notes:
+- `docker-compose.yml` is the deployment runtime.
+- `docker-compose.dev.yml` is only for local development with source bind mount and hot reload.
 
 ## Operations
 

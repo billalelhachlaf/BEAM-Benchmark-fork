@@ -6,6 +6,8 @@ Use this section to modify code safely and explain architecture during technical
 
 - Safe code modification workflow: [how_to_modify_code.md](how_to_modify_code.md)
 - API and route map: [api_route_map.md](api_route_map.md)
+- Detailed code presentation: [presentation_code.md](presentation_code.md)
+- Modifiable code areas: [code_a_modifier.md](code_a_modifier.md)
 
 ## Required Reading Before Editing
 

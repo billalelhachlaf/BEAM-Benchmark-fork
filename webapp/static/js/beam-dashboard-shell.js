@@ -63,9 +63,9 @@
       }
       if (idx === 3) {
         const endpoint = text('#target-endpoint-select');
-        if (!endpoint) return 'Step 3: choose a target endpoint.';
+        if (!endpoint) return 'Step 1: choose a target endpoint.';
         if (endpoint === 'custom' && !text('#target-endpoint-url-input')) {
-          return 'Step 3: custom endpoint URL is required.';
+          return 'Step 1: custom endpoint URL is required.';
         }
       }
       if (idx === 4) {

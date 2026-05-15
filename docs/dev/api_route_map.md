@@ -1,6 +1,8 @@
 # API and Route Map
 
-Primary code location: `webapp/main.py`.
+Primary code locations:
+- entrypoint: `webapp/main.py`
+- route modules: `webapp/modules/routes_*.py`
 
 ## HTML Pages
 

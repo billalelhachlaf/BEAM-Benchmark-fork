@@ -25,16 +25,18 @@ This documentation is organized by audience and depth.
 ## 3. User Documentation
 
 - Overview: [user/README.md](user/README.md)
+- Getting started guide: [user/guide_de_demarrage.md](user/guide_de_demarrage.md)
 - Step-by-step tutorial: [user/tutorial.md](user/tutorial.md)
 - Recipes by use case: [user/recipes.md](user/recipes.md)
 - Results interpretation: [user/results_interpretation.md](user/results_interpretation.md)
 - FAQ: [user/faq.md](user/faq.md)
 
 Recommended user path:
-1. Open in-app `/tutorial`.
-2. Run one small benchmark job.
-3. Use `user/recipes.md` to refine matching strategy.
-4. Use `user/results_interpretation.md` to evaluate outputs.
+1. Read `user/guide_de_demarrage.md` for the project overview.
+2. Open in-app `/tutorial`.
+3. Run one small benchmark job.
+4. Use `user/recipes.md` to refine matching strategy.
+5. Use `user/results_interpretation.md` to evaluate outputs.
 
 ## 4. Processing and Algorithms (Code-Level)
 
@@ -48,6 +50,8 @@ Recommended user path:
 - Developer index: [dev/README.md](dev/README.md)
 - How to modify code safely: [dev/how_to_modify_code.md](dev/how_to_modify_code.md)
 - API and route map: [dev/api_route_map.md](dev/api_route_map.md)
+- Detailed code presentation: [dev/presentation_code.md](dev/presentation_code.md)
+- Modifiable code areas: [dev/code_a_modifier.md](dev/code_a_modifier.md)
 
 ## 6. Verification and Demonstration Assets
 

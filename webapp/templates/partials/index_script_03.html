@@ -1,0 +1,850 @@
+  if (!txt) return null;
+  const m = txt.match(/ETA:\s*([^|]+)/i);
+  if (!m) return null;
+  const eta = String(m[1] || '').trim();
+  if (!eta || /^n\/a$/i.test(eta) || /^na$/i.test(eta) || /^[-—]$/.test(eta) || isZeroEtaText(eta)) return null;
+  return eta;
+}
+
+function estimateEtaFromPct(pct, startedAtSec) {
+  const p = Number(pct);
+  const startedMs = Number(startedAtSec) * 1000;
+  if (!Number.isFinite(p) || p <= 0 || p >= 100) return null;
+  if (p >= 99.5) return null;
+  if (!Number.isFinite(startedMs) || startedMs <= 0) return null;
+  const elapsedSec = (Date.now() - startedMs) / 1000;
+  if (!Number.isFinite(elapsedSec) || elapsedSec <= 0) return null;
+  const totalSec = elapsedSec / (p / 100.0);
+  const remSec = totalSec - elapsedSec;
+  if (!Number.isFinite(remSec) || remSec <= 1) return null;
+  return formatEtaSeconds(remSec);
+}
+
+function computeSubjobEta(subjob, fallbackProgressText) {
+  const status = String((subjob && subjob.status) || '');
+  if (status !== 'running' && status !== 'queued') return '—';
+  const etaFromText = extractEtaText(subjob && subjob.progress_text);
+  if (etaFromText) return etaFromText;
+  const etaFromFallback = extractEtaText(fallbackProgressText);
+  if (etaFromFallback) return etaFromFallback;
+  const etaFromPct = estimateEtaFromPct(subjob && subjob.progress_pct, subjob && subjob.started_at);
+  if (etaFromPct) return etaFromPct;
+  return '—';
+}
+
+function setPhaseLogVisibility(jobId, phase) {
+  const alignDetails = document.getElementById('details-align-' + jobId);
+  const buildDetails = document.getElementById('details-build-' + jobId);
+  if (!alignDetails || !buildDetails) return;
+  if (phase === 'align') {
+    alignDetails.open = true;
+    buildDetails.open = false;
+  } else if (phase === 'build') {
+    alignDetails.open = false;
+    buildDetails.open = true;
+  }
+}
+
+function updateJobArtifacts(jobId, payload) {
+  const resultEl = document.getElementById('job-result-' + jobId);
+  if (resultEl) {
+    if (payload.result_path) {
+      resultEl.style.display = '';
+      resultEl.textContent = `Result: ${payload.result_path}`;
+    } else {
+      resultEl.style.display = 'none';
+      resultEl.textContent = '';
+    }
+  }
+
+  const alignEl = document.getElementById('job-align-dir-' + jobId);
+  if (alignEl) {
+    if (payload.align_dir) {
+      alignEl.style.display = '';
+      alignEl.textContent = `Align dir: ${payload.align_dir}${payload.reused_align ? ' (cached)' : ''}`;
+    } else {
+      alignEl.style.display = 'none';
+      alignEl.textContent = '';
+    }
+  }
+
+  const outBox = document.getElementById('job-build-output-' + jobId);
+  if (outBox) {
+    const out = payload.outputs || {};
+    if (out.build_done) {
+      let html = '<div class="info">Build completed. Files saved in:';
+      if (out.build_out_with) html += `<br/>- ${escapeHtml(out.build_out_with)}`;
+      if (out.build_out_without) html += `<br/>- ${escapeHtml(out.build_out_without)}`;
+      html += '</div>';
+      outBox.innerHTML = html;
+    } else if (payload.status === 'done' && payload.result_path) {
+      outBox.innerHTML = `<div class="warn">Job is done but BUILD_DONE marker not found at: ${escapeHtml(out.build_done_file || 'N/A')}</div>`;
+    } else {
+      outBox.innerHTML = '';
+    }
+  }
+}
+
+function setJobCollapsed(jobId, collapsed) {
+  const body = document.getElementById('job-body-' + jobId);
+  const btn = document.querySelector(`.js-toggle-job[data-job-id="${jobId}"]`);
+  const card = document.getElementById('job-card-' + jobId);
+  if (!body || !btn) return;
+  body.classList.toggle('collapsed', !!collapsed);
+  btn.textContent = collapsed ? '+' : '-';
+  if (card) card.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
+function toggleJobCollapsed(jobId) {
+  const body = document.getElementById('job-body-' + jobId);
+  if (!body) return;
+  const next = !body.classList.contains('collapsed');
+  setJobCollapsed(jobId, next);
+  const state = getMinimizedJobs();
+  state[jobId] = next ? 1 : 0;
+  saveMinimizedJobs(state);
+}
+
+function shouldIgnoreCardToggle(event) {
+  const target = event && event.target;
+  if (!target || !(target instanceof Element)) return true;
+  if (
+    target.closest(
+      'button,a,input,select,textarea,label,summary,details,form,[contenteditable="true"],[data-no-card-toggle],.logbox,.job-actions,.build-actions,.subjob-actions,.parts-list'
+    )
+  ) {
+    return true;
+  }
+  try {
+    const sel = window.getSelection ? String(window.getSelection() || '') : '';
+    if (sel && sel.trim().length > 0) return true;
+  } catch (_) {}
+  return false;
+}
+
+function bindJobMinimize() {
+  const minimized = getMinimizedJobs();
+  document.querySelectorAll('.js-toggle-job').forEach((btn) => {
+    const jobId = btn.dataset.jobId;
+    const initialCollapsed = minimized[jobId] !== 0;
+    setJobCollapsed(jobId, initialCollapsed);
+    if (btn.dataset.bound === '1') return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggleJobCollapsed(jobId);
+    });
+  });
+  document.querySelectorAll('.job[data-job-id]').forEach((card) => {
+    const jobId = card.dataset.jobId;
+    if (!jobId) return;
+    if (card.dataset.bound === '1') return;
+    card.dataset.bound = '1';
+    card.addEventListener('click', (event) => {
+      if (shouldIgnoreCardToggle(event)) return;
+      toggleJobCollapsed(jobId);
+    });
+  });
+}
+
+function setBuildCollapsed(buildId, collapsed) {
+  const body = document.getElementById('build-body-' + buildId);
+  const btn = document.querySelector(`.js-toggle-build[data-build-id="${buildId}"]`);
+  const card = document.getElementById('build-card-' + buildId);
+  if (!body || !btn) return;
+  body.classList.toggle('collapsed', !!collapsed);
+  btn.textContent = '↗';
+  btn.title = 'Open details';
+  btn.setAttribute('aria-label', 'Open details');
+  if (card) card.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
+function toggleBuildCollapsed(buildId) {
+  const body = document.getElementById('build-body-' + buildId);
+  if (!body) return;
+  const next = !body.classList.contains('collapsed');
+  setBuildCollapsed(buildId, next);
+  const state = getMinimizedBuilds();
+  state[buildId] = next ? 1 : 0;
+  saveMinimizedBuilds(state);
+}
+
+function buildDetailUrlFromCard(card) {
+  if (!card) return '';
+  const explicit = normalizeFormText(card.dataset.buildDetailUrl);
+  if (explicit) return explicit;
+  const className = normalizeFormText(card.dataset.className);
+  const buildName = normalizeFormText(card.dataset.buildName);
+  if (!className || !buildName) return '';
+  return `/builds/${encodeURIComponent(className)}/${encodeURIComponent(buildName)}${DASHBOARD_TEST_MODE ? '?test_mode=1' : ''}`;
+}
+
+function openBuildDetailFromCard(card) {
+  const url = buildDetailUrlFromCard(card);
+  if (!url) return;
+  window.location.assign(url);
+}
+
+function bindBuildMinimize() {
+  document.querySelectorAll('.js-toggle-build').forEach((btn) => {
+    const buildId = btn.dataset.buildId;
+    setBuildCollapsed(buildId, true);
+  });
+  document.querySelectorAll('.build[data-build-id]').forEach((card) => {
+    const buildId = card.dataset.buildId;
+    if (!buildId) return;
+    if (card.dataset.bound === '1') return;
+    card.dataset.bound = '1';
+    card.addEventListener('click', (event) => {
+      if (shouldIgnoreCardToggle(event)) return;
+      openBuildDetailFromCard(card);
+    });
+  });
+}
+
+function setBuildStarState(btn, enabled) {
+  if (!btn) return;
+  btn.classList.toggle('off', !enabled);
+  btn.innerHTML = enabled ? '&#9733;' : '&#9734;';
+  btn.title = enabled ? 'Unmark build' : 'Mark build';
+  btn.setAttribute('aria-label', enabled ? 'Unmark build' : 'Mark build');
+}
+
+function bindBuildStars() {
+  const stars = getStarredBuilds();
+  document.querySelectorAll('.js-toggle-build-star[data-build-key]').forEach((btn) => {
+    const key = normalizeFormText(btn.dataset.buildKey);
+    if (!key) return;
+    setBuildStarState(btn, !!stars[key]);
+    if (btn.dataset.bound === '1') return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const buildKey = normalizeFormText(btn.dataset.buildKey);
+      if (!buildKey) return;
+      const map = getStarredBuilds();
+      if (map[buildKey]) {
+        delete map[buildKey];
+      } else {
+        map[buildKey] = 1;
+      }
+      saveStarredBuilds(map);
+      setBuildStarState(btn, !!map[buildKey]);
+      if (getHistoryVisibilityMode() !== 'all') {
+        applyHistorySearchFilter();
+      }
+    });
+  });
+}
+
+function refreshBuildEmptyState() {
+  const list = document.getElementById('build-list');
+  const empty = document.getElementById('build-empty-msg');
+  if (!list || !empty) return;
+  const cards = list.querySelectorAll('.build[data-build-key]');
+  const hasBuilds = cards.length > 0;
+  empty.style.display = hasBuilds ? 'none' : '';
+  const searchEmpty = document.getElementById('build-search-empty-msg');
+  if (searchEmpty && !hasBuilds) {
+    searchEmpty.style.display = 'none';
+  }
+}
+
+function parseBuildCardLinksCount(card) {
+  if (!card) return 0;
+  const raw = String(card.dataset.linksCount || '').trim();
+  const parsed = Number.parseInt(raw.replace(/[^0-9-]/g, ''), 10);
+  if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  const text = String(card.textContent || '');
+  const m = text.match(/Links:\s*([0-9,]+)/i);
+  if (!m) return 0;
+  const fallback = Number.parseInt(String(m[1] || '').replaceAll(',', ''), 10);
+  return Number.isFinite(fallback) && fallback >= 0 ? fallback : 0;
+}
+
+function parseBuildCardId(card) {
+  const parsed = Number.parseInt(String(card?.dataset?.buildId || ''), 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseBuildCardDoneAt(card) {
+  if (!card) return Number.NEGATIVE_INFINITY;
+  const raw = String(card.dataset.buildDoneAt || '').trim();
+  if (!raw) return Number.NEGATIVE_INFINITY;
+  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+  const parsed = Date.parse(normalized);
+  if (Number.isFinite(parsed)) return parsed;
+  return Number.NEGATIVE_INFINITY;
+}
+
+function regroupHistoryByClass() {
+  const list = document.getElementById('build-list');
+  if (!list) return;
+  const cards = Array.from(list.querySelectorAll('.build[data-build-key]'));
+  const oldGroups = Array.from(list.querySelectorAll('.build-group'));
+  oldGroups.forEach((g) => g.remove());
+  if (!cards.length) return;
+  const classOrder = [];
+  const buckets = new Map();
+  cards.forEach((card) => {
+    const className = normalizeFormText(card.dataset.className) || 'Unknown';
+    if (!buckets.has(className)) {
+      buckets.set(className, []);
+      classOrder.push(className);
+    }
+    buckets.get(className).push(card);
+  });
+  classOrder.forEach((className) => {
+    const section = document.createElement('section');
+    section.className = 'build-group';
+    section.dataset.className = className;
+    const title = document.createElement('div');
+    title.className = 'build-group-title';
+    const total = (buckets.get(className) || []).length;
+    title.innerHTML = `<b>${escapeHtml(className)}</b><span class="build-group-count">(${total})</span>`;
+    const body = document.createElement('div');
+    body.className = 'build-group-body';
+    (buckets.get(className) || []).forEach((card) => body.appendChild(card));
+    section.appendChild(title);
+    section.appendChild(body);
+    list.appendChild(section);
+  });
+}
+
+function refreshHistoryClassGroups() {
+  const list = document.getElementById('build-list');
+  if (!list) return;
+  const hasQuery = String(document.getElementById('history-search-input')?.value || '').trim().length > 0;
+  list.querySelectorAll('.build-group').forEach((group) => {
+    const cards = Array.from(group.querySelectorAll('.build[data-build-key]'));
+    const visible = cards.filter((card) => card.style.display !== 'none').length;
+    const total = cards.length;
+    const count = group.querySelector('.build-group-count');
+    if (count) {
+      count.textContent = hasQuery ? `(${visible}/${total})` : `(${total})`;
+    }
+    group.style.display = visible > 0 ? '' : 'none';
+  });
+}
+
+function applyHistorySortOrder() {
+  const list = document.getElementById('build-list');
+  if (!list) return;
+  const sortSelect = document.getElementById('history-sort-select');
+  const mode = String(sortSelect?.value || 'recent');
+  const cards = Array.from(list.querySelectorAll('.build[data-build-key]'));
+  list.querySelectorAll('.build-group').forEach((group) => group.remove());
+  const sorted = cards.sort((a, b) => {
+    const aId = parseBuildCardId(a);
+    const bId = parseBuildCardId(b);
+    if (mode === 'links_desc') {
+      const d = parseBuildCardLinksCount(b) - parseBuildCardLinksCount(a);
+      return d !== 0 ? d : (aId - bId);
+    }
+    if (mode === 'links_asc') {
+      const d = parseBuildCardLinksCount(a) - parseBuildCardLinksCount(b);
+      return d !== 0 ? d : (aId - bId);
+    }
+    const aDone = parseBuildCardDoneAt(a);
+    const bDone = parseBuildCardDoneAt(b);
+    if (aDone !== bDone) return bDone - aDone;
+    return bId - aId;
+  });
+  sorted.forEach((card) => list.appendChild(card));
+  regroupHistoryByClass();
+}
+
+function applyHistorySearchFilter() {
+  const list = document.getElementById('build-list');
+  if (!list) return;
+  applyHistorySortOrder();
+  const cards = Array.from(list.querySelectorAll('.build[data-build-key]'));
+  const input = document.getElementById('history-search-input');
+  const queryRaw = String(input?.value || '').trim().toLowerCase();
+  const terms = queryRaw.split(/\s+/).filter(Boolean);
+  const mode = getHistoryVisibilityMode();
+  const stars = getStarredBuilds();
+  let visibleCount = 0;
+  cards.forEach((card) => {
+    const buildKey = normalizeFormText(card.dataset.buildKey);
+    const cb = card.querySelector('.build-select-checkbox');
+    const matchesMode = mode === 'all'
+      ? true
+      : (mode === 'starred' ? !!stars[buildKey] : !!(cb && cb.checked));
+    const haystack = String(card.textContent || '').toLowerCase();
+    const match = matchesMode && terms.every((term) => haystack.includes(term));
+    card.style.display = match ? '' : 'none';
+    if (match) visibleCount += 1;
+  });
+  refreshHistoryClassGroups();
+  const searchEmpty = document.getElementById('build-search-empty-msg');
+  if (searchEmpty) {
+    const hasFilter = terms.length > 0 || mode !== 'all';
+    searchEmpty.style.display = (hasFilter && cards.length > 0 && visibleCount === 0) ? '' : 'none';
+  }
+  refreshBuildEmptyState();
+  updateSelectedBuildsUi();
+}
+
+function bindHistorySearch() {
+  const input = document.getElementById('history-search-input');
+  if (!input || input.dataset.bound === '1') return;
+  input.dataset.bound = '1';
+  input.addEventListener('input', () => {
+    applyHistorySearchFilter();
+  });
+  const sortSelect = document.getElementById('history-sort-select');
+  if (sortSelect && sortSelect.dataset.bound !== '1') {
+    sortSelect.dataset.bound = '1';
+    sortSelect.addEventListener('change', () => {
+      applyHistorySearchFilter();
+    });
+  }
+  applyHistorySearchFilter();
+}
+
+function getSelectedBuildRefs() {
+  return Array.from(document.querySelectorAll('.build[data-build-key]')).flatMap((card) => {
+    const cb = card.querySelector('.build-select-checkbox');
+    if (!cb || !cb.checked) return [];
+    const className = normalizeFormText(card.dataset.className);
+    const buildName = normalizeFormText(card.dataset.buildName);
+    if (!className || !buildName) return [];
+    return [{ class_name: className, build_name: buildName }];
+  });
+}
+
+function updateSelectedBuildsUi() {
+  const refs = getSelectedBuildRefs();
+  const btn = document.getElementById('history-download-selected-btn');
+  const hidden = document.getElementById('selected-builds-input');
+  if (hidden) hidden.value = JSON.stringify(refs);
+  if (!btn) return;
+  btn.style.display = refs.length > 0 ? '' : 'none';
+  btn.disabled = refs.length === 0;
+  btn.textContent = `Download selected (${refs.length})`;
+}
+
+function bindHistoryBulkDownload() {
+  const btn = document.getElementById('history-download-selected-btn');
+  const form = document.getElementById('download-selected-builds-form');
+  if (!btn || !form || btn.dataset.bound === '1') return;
+  btn.dataset.bound = '1';
+  btn.addEventListener('click', () => {
+    const refs = getSelectedBuildRefs();
+    if (!refs.length) return;
+    const hidden = document.getElementById('selected-builds-input');
+    if (hidden) hidden.value = JSON.stringify(refs);
+    form.submit();
+  });
+  document.addEventListener('change', (event) => {
+    const t = event && event.target;
+    if (!(t instanceof Element)) return;
+    if (!t.matches('.build-select-checkbox')) return;
+    updateSelectedBuildsUi();
+    if (getHistoryVisibilityMode() === 'selected') {
+      applyHistorySearchFilter();
+    }
+  });
+  updateSelectedBuildsUi();
+}
+
+function refreshJobsEmptyState() {
+  const list = document.getElementById('jobs-list');
+  const empty = document.getElementById('jobs-empty-msg');
+  if (!list || !empty) return;
+  const hasJobs = !!list.querySelector('.job[data-job-id]');
+  empty.style.display = hasJobs ? 'none' : '';
+}
+
+function buildKeyOf(build) {
+  return `${build && build.class_name ? build.class_name : ''}::${build && build.build_name ? build.build_name : ''}`;
+}
+
+function hasBuildCard(buildKey) {
+  if (!buildKey) return false;
+  return Array.from(document.querySelectorAll('.build[data-build-key]')).some((el) => el.dataset.buildKey === buildKey);
+}
+
+function removeDoneJobsFromList(activeJobIds) {
+  const active = new Set((Array.isArray(activeJobIds) ? activeJobIds : []).map((v) => Number(v)));
+  document.querySelectorAll('.job[data-job-id]').forEach((el) => {
+    const id = Number(el.dataset.jobId || 0);
+    if (!id || active.has(id)) return;
+    stopReconnectByJob[id] = true;
+    closeSocketNow(id);
+    el.remove();
+  });
+  refreshJobsEmptyState();
+}
+
+function buildCardHtml(build, cardId, buildId, bodyId, buildKey) {
+  const className = String(build.class_name || '');
+  const buildName = String(build.build_name || '');
+  const endpointLabel = String(build.endpoint_label || 'Wikidata');
+  const linkingElementsText = String(build.linking_elements_text || '').trim();
+  const linkingStatsText = String(build.linking_stats_text || '').trim();
+  const doneLabel = String(build.done_label || 'Last update');
+  const doneAt = escapeHtml(build.done_at || 'N/A');
+  const path = escapeHtml(build.path || '');
+  const actionClass = encodeURIComponent(className);
+  const actionBuild = encodeURIComponent(buildName);
+  const detailAction = `/builds/${actionClass}/${actionBuild}${DASHBOARD_TEST_MODE ? '?test_mode=1' : ''}`;
+  const downloadAction = `/builds/${actionClass}/${actionBuild}/download`;
+  const deleteAction = `/builds/${actionClass}/${actionBuild}/delete`;
+  const variant = build.with_link || build.without_link || null;
+  const linksCountRaw = (variant && variant.links_count !== undefined && variant.links_count !== null) ? variant.links_count : 0;
+  const linksCountNum = Number.parseInt(String(linksCountRaw).replace(/[^0-9-]/g, ''), 10);
+  const linksCount = Number.isFinite(linksCountNum) && linksCountNum >= 0 ? linksCountNum : 0;
+  let tilesHtml = '';
+  let qaHtml = '';
+  if (variant) {
+    tilesHtml = `
+      <div class="build-tiles">
+        <div class="tile"><div class="tile-label">Total Size</div><div class="tile-value">${escapeHtml(variant.size_total_h || '—')}</div></div>
+        <div class="tile"><div class="tile-label">Entity Links</div><div class="tile-value">${escapeHtml(variant.links_count || '0')}</div></div>
+        <div class="tile"><div class="tile-label">WDC Properties</div><div class="tile-value">${escapeHtml(variant.wdc_props || '0')}</div></div>
+        <div class="tile"><div class="tile-label">WD Properties</div><div class="tile-value">${escapeHtml(variant.wd_props || '0')}</div></div>
+      </div>
+    `;
+    const warnings = Array.isArray(variant.qa_warnings) ? variant.qa_warnings : [];
+    const warningText = warnings.length > 0
+      ? `<div class="small qa-warning">${escapeHtml(warnings.join('; '))}</div>`
+      : `<div class="small">No major issues detected.</div>`;
+    const sampleLinks = Array.isArray(variant.sample_links) ? variant.sample_links : [];
+    const topWdc = Array.isArray(variant.top_wdc_props) ? variant.top_wdc_props : [];
+    const topWd = Array.isArray(variant.top_wd_props) ? variant.top_wd_props : [];
+    const sampleLinksHtml = sampleLinks.length > 0
+      ? `
+        <div class="qa-block">
+          <div class="small"><b>Sample entity links</b></div>
+          ${sampleLinks.map((row) => `
+            <div class="qa-kv">
+              <div class="qa-left">${escapeHtml(row.wdc_iri || '')}</div>
+              <div class="qa-right">${escapeHtml(row.wikidata_uri || '')}</div>
+            </div>
+          `).join('')}
+        </div>
+      `
+      : '';
+    const topPropsHtml = (topWdc.length > 0 || topWd.length > 0)
+      ? `
+        <div class="qa-block">
+          ${topWdc.length > 0 ? `
+            <div class="small"><b>Top WDC properties</b></div>
+            ${topWdc.map((row) => `
+              <div class="qa-kv">
+                <div class="qa-left">${escapeHtml(row.property || '')}</div>
+                <div class="qa-right">${escapeHtml(String(row.count ?? '0'))}</div>
+              </div>
+            `).join('')}
+          ` : ''}
+          ${topWd.length > 0 ? `
+            <div class="small" style="margin-top:6px;"><b>Top target properties</b></div>
+            ${topWd.map((row) => `
+              <div class="qa-kv">
+                <div class="qa-left">${escapeHtml(row.property || '')}</div>
+                <div class="qa-right">${escapeHtml(String(row.count ?? '0'))}</div>
+              </div>
+            `).join('')}
+          ` : ''}
+        </div>
+      `
+      : '';
+    qaHtml = `
+      <div class="qa-box">
+        <div><b>Result QA</b></div>
+        ${warningText}
+        ${sampleLinksHtml}
+        ${topPropsHtml}
+      </div>
+    `;
+  }
+  const cfgGroups = Array.isArray(build.config_groups) ? build.config_groups : [];
+  let cfgHtml = '';
+  if (cfgGroups.length > 0) {
+    const groupsHtml = cfgGroups.map((group) => {
+      const title = escapeHtml((group && group.title) || '');
+      const items = Array.isArray(group && group.items) ? group.items : [];
+      const rowsHtml = items.map((item) => {
+        const key = escapeHtml(Array.isArray(item) ? item[0] : '');
+        const valRaw = Array.isArray(item) ? item[1] : '';
+        const val = escapeHtml(valRaw === null || valRaw === undefined ? '' : String(valRaw));
+        return `
+          <div class="cfg-row">
+            <div class="cfg-key">${key}</div>
+            <div class="cfg-val">${val}</div>
+          </div>
+        `;
+      }).join('');
+      return `
+        <div class="cfg-group">
+          <div class="cfg-title">${title}</div>
+          ${rowsHtml}
+        </div>
+      `;
+    }).join('');
+    cfgHtml = `
+      <div class="build-config">
+        <div><b>Config</b></div>
+        ${groupsHtml}
+      </div>
+    `;
+  }
+  return `
+    <div class="build selectable-card" id="${cardId}" data-build-id="${buildId}" data-build-key="${escapeHtml(buildKey)}" data-class-name="${escapeHtml(className)}" data-build-name="${escapeHtml(buildName)}" data-build-detail-url="${detailAction}" data-build-done-at="${doneAt}" data-links-count="${linksCount}">
+      <div class="build-head">
+        <div class="header-left">
+          <label class="build-select-wrap" title="Select build" data-no-card-toggle>
+            <input type="checkbox" class="build-select-checkbox" data-no-card-toggle />
+          </label>
+          <a class="btn-icon js-toggle-build" data-build-id="${buildId}" href="${detailAction}" title="Open details" aria-label="Open details">&#8599;</a>
+          <div>
+            <a class="build-title-link" href="${detailAction}"><b>${escapeHtml(className)}</b></a>
+            <span class="small">· ${escapeHtml(endpointLabel)}${linkingElementsText ? ` - ${escapeHtml(linkingElementsText)}` : ''} - ${escapeHtml(doneLabel)}: ${doneAt} · Links: ${escapeHtml(String(linksCount))}</span>
+            ${linkingStatsText ? `<div class="small">${escapeHtml(linkingStatsText)}</div>` : ''}
+          </div>
+        </div>
+        <div class="head-actions">
+          <button class="btn-icon star off js-toggle-build-star" type="button" data-no-card-toggle data-build-key="${escapeHtml(buildKey)}" title="Mark build" aria-label="Mark build">&#9734;</button>
+          <form method="post" action="${deleteAction}" class="js-async-form" data-delete-target="${cardId}">
+            <button class="btn-icon danger" type="submit" title="Delete build" aria-label="Delete build">&#128465;</button>
+          </form>
+        </div>
+      </div>
+      <div class="build-body" id="${bodyId}">
+        <div class="small build-path">Path: ${path}</div>
+        <div class="build-actions">
+          <form method="get" action="${downloadAction}">
+            <button class="btn secondary" type="submit">Download build</button>
+          </form>
+          <form method="post" action="/builds/${actionClass}/${actionBuild}/rerun" class="js-async-form">
+            <button class="btn secondary" type="submit">Rerun same config</button>
+          </form>
+          <form method="post" action="${deleteAction}" class="js-async-form" data-delete-target="${cardId}">
+            <button class="btn danger" type="submit">Delete build</button>
+          </form>
+        </div>
+        ${tilesHtml}
+        ${qaHtml}
+        ${cfgHtml}
+      </div>
+    </div>
+  `;
+}
+
+function reconcileBuildList(builds) {
+  const list = document.getElementById('build-list');
+  if (!list || !Array.isArray(builds)) return 0;
+  let inserted = 0;
+  builds.forEach((build) => {
+    const key = buildKeyOf(build);
+    if (!key || hasBuildCard(key)) return;
+    const buildId = nextBuildDomId++;
+    const cardId = `build-card-${buildId}`;
+    const bodyId = `build-body-${buildId}`;
+    list.insertAdjacentHTML('afterbegin', buildCardHtml(build, cardId, buildId, bodyId, key));
+    inserted += 1;
+  });
+  if (inserted > 0) {
+    setupAsyncForms();
+    bindBuildMinimize();
+    bindBuildStars();
+    applyHistorySearchFilter();
+    updateSelectedBuildsUi();
+  }
+  return inserted;
+}
+
+function clearSocketTimers(jobId) {
+  if (logPingTimers[jobId]) {
+    clearInterval(logPingTimers[jobId]);
+    delete logPingTimers[jobId];
+  }
+  if (logWatchdogTimers[jobId]) {
+    clearInterval(logWatchdogTimers[jobId]);
+    delete logWatchdogTimers[jobId];
+  }
+}
+
+function closeSocketNow(jobId) {
+  clearSocketTimers(jobId);
+  if (activeLogSockets[jobId]) {
+    try { activeLogSockets[jobId].close(); } catch (_) {}
+    delete activeLogSockets[jobId];
+  }
+}
+
+function closeSocketGracefully(jobId, delayMs = 1200) {
+  stopReconnectByJob[jobId] = true;
+  setTimeout(() => closeSocketNow(jobId), delayMs);
+}
+
+function applyProgressPayload(jobId, payload, opts = {}) {
+  const phase = payload.phase || '';
+  const statusRaw = payload.status || '';
+  const prevStatus = lastStatusByJob[jobId] || '';
+  lastStatusByJob[jobId] = statusRaw;
+  const status = (payload.cancel_requested && (statusRaw === 'running' || statusRaw === 'queued')) ? 'cancelling' : statusRaw;
+
+  const jobCard = document.getElementById('job-card-' + jobId);
+  if (jobCard) jobCard.dataset.jobStatus = statusRaw;
+  if (phase && jobCard) jobCard.dataset.jobPhase = phase;
+  if (phase && phaseByJob[jobId] !== phase) {
+    phaseByJob[jobId] = phase;
+    setPhaseLogVisibility(jobId, phase);
+  }
+
+  const jobPill = document.getElementById('job-pill-' + jobId);
+  if (jobPill) {
+    const cls = (status === 'running') ? 'pill run'
+      : (status === 'done') ? 'pill ok'
+      : (status === 'cancelling') ? 'pill cancel'
+      : (status === 'error' || status === 'cancelled' || status === 'interrupted') ? 'pill err'
+      : 'pill';
+    jobPill.className = cls;
+    jobPill.textContent = `${status}${phase ? ' · ' + phase : ''}`;
+  }
+
+  const err = document.getElementById('job-error-' + jobId);
+  if (err) {
+    const em = payload.error_message || '';
+    if (em) {
+      err.style.display = '';
+      err.textContent = em;
+    } else {
+      err.style.display = 'none';
+      err.textContent = '';
+    }
+  }
+
+  updateJobArtifacts(jobId, payload);
+  const finalLinksEl = document.getElementById('job-final-links-' + jobId);
+  if (finalLinksEl) {
+    const v = payload.final_links_count;
+    const shown = (v === null || v === undefined || v === '') ? '—' : String(v);
+    finalLinksEl.textContent = `Final entity links (exact): ${shown}`;
+  }
+
+  const jobCancelWrap = document.getElementById('job-cancel-wrap-' + jobId);
+  if (jobCancelWrap) {
+    jobCancelWrap.style.display = (statusRaw === 'running' || statusRaw === 'queued') ? '' : 'none';
+  }
+  const jobDeleteWrap = document.getElementById('job-delete-wrap-' + jobId);
+  if (jobDeleteWrap) {
+    jobDeleteWrap.style.display = (statusRaw === 'running' || statusRaw === 'queued') ? 'none' : '';
+  }
+  const jobDeleteIconWrap = document.getElementById('job-delete-icon-wrap-' + jobId);
+  if (jobDeleteIconWrap) {
+    jobDeleteIconWrap.style.display = (statusRaw === 'running' || statusRaw === 'queued') ? 'none' : '';
+  }
+
+  const terminal = TERMINAL_STATUSES.has(statusRaw);
+  const becameTerminal = terminal && !TERMINAL_STATUSES.has(prevStatus);
+
+  let phaseEtaUpdated = false;
+  if (Array.isArray(payload.subjobs)) {
+    payload.subjobs.forEach((sj) => {
+      const t = sj.type;
+      const cancelling = !!sj.cancel_requested && (sj.status === 'running' || sj.status === 'queued');
+      const shownStatus = cancelling ? 'cancelling' : (sj.status || 'pending');
+      const pill = document.getElementById(`subjob-pill-${jobId}-${t}`);
+      if (pill) {
+        const cls = (shownStatus === 'running') ? 'pill run'
+          : (shownStatus === 'done') ? 'pill ok'
+          : (shownStatus === 'cancelling') ? 'pill cancel'
+          : (shownStatus === 'error' || shownStatus === 'cancelled' || shownStatus === 'interrupted') ? 'pill err'
+          : 'pill';
+        pill.className = cls;
+        pill.textContent = shownStatus;
+      }
+      const p = document.getElementById(`subjob-progress-${jobId}-${t}`);
+      const etaEl = document.getElementById(`subjob-eta-${jobId}-${t}`);
+      const s = document.getElementById(`subjob-step-${jobId}-${t}`);
+      const f = document.getElementById(`subjob-file-${jobId}-${t}`);
+      if (p) p.textContent = `Progress: ${sj.progress_text || '—'}`;
+      const etaText = computeSubjobEta(sj, t === phase ? payload.progress_text : null);
+      if (etaEl) etaEl.textContent = `ETA: ${etaText}`;
+      if (s) s.textContent = sj.current_step ? `Step: ${sj.current_step}` : '';
+      if (f) f.textContent = sj.current_file ? `File: ${sj.current_file}` : '';
+      updateLaneMeta(jobId, t, {
+        status: shownStatus,
+        step: sj.current_step || undefined,
+        etaText,
+      });
+      if (phase && t === phase) {
+        phaseEtaUpdated = true;
+      }
+      const cancelWrap = document.getElementById(`subjob-cancel-wrap-${jobId}-${t}`);
+      if (cancelWrap) {
+        const canCancelJob = statusRaw === 'running' || statusRaw === 'queued';
+        const canCancelSub = sj.status === 'running' || sj.status === 'queued';
+        cancelWrap.style.display = (canCancelJob && canCancelSub) ? '' : 'none';
+      }
+    });
+  }
+  if (phase && !phaseEtaUpdated) {
+    const etaText = extractEtaText(payload.progress_text) || '—';
+    updateLaneMeta(jobId, phase, { etaText });
+  }
+  // Fallback logging path: when detailed job_events are sparse, still mirror
+  // progress_text into the visible log boxes so users can follow live runs.
+  const progressMsgRaw = String(payload.progress_text || '').replace(/\u001b\[[0-9;]*m/g, '').replace(/\r/g, '').trim();
+  if (progressMsgRaw) {
+    const lane = (phase === 'align') ? 'align' : 'build';
+    const progressKey = `${lane}|${progressMsgRaw}`;
+    if (lastProgressLogByJob[jobId] !== progressKey) {
+      const box = document.getElementById(lane === 'align' ? ('log-align-' + jobId) : ('log-build-' + jobId));
+      appendLogLine(box, `[${new Date().toLocaleTimeString()}] ${progressMsgRaw}`);
+      lastProgressLogByJob[jobId] = progressKey;
+    }
+  }
+  if (terminal) {
+    updateLaneMeta(jobId, 'align', { etaText: '—' });
+    updateLaneMeta(jobId, 'build', { etaText: '—' });
+  }
+
+  if (statusRaw === 'done') {
+    updateLaneMeta(jobId, 'align', { status: 'done' });
+    updateLaneMeta(jobId, 'build', { status: 'done' });
+    closeSocketGracefully(jobId, 1200);
+  } else if (statusRaw === 'error' || statusRaw === 'cancelled' || statusRaw === 'interrupted') {
+    stopReconnectByJob[jobId] = true;
+    closeSocketNow(jobId);
+  }
+
+  if (!opts.skipTerminalActions && becameTerminal && !terminalHandledByJob[jobId]) {
+    terminalHandledByJob[jobId] = true;
+    if (statusRaw === 'done') {
+      const out = payload.outputs || {};
+      const msg = (out.build_done || payload.result_path)
+        ? `Build completed for Job ${jobId}`
+        : `Job ${jobId} completed`;
+      showToast(msg, 'success');
+      setTimeout(() => pollDashboardOnce(), 120);
+    } else if (statusRaw === 'error') {
+      showToast(`Job ${jobId} failed`, 'error');
+    } else {
+      showToast(`Job ${jobId} ${statusRaw}`, 'warn');
+    }
+  }
+}
+
+function startLogs(jobId) {
+  if (stopReconnectByJob[jobId]) return;
+  if (logReconnectTimers[jobId]) {
+    clearTimeout(logReconnectTimers[jobId]);
+    delete logReconnectTimers[jobId];
+  }
+  if (activeLogSockets[jobId] && activeLogSockets[jobId].readyState <= 1) return;
+  const alignBox = document.getElementById('log-align-' + jobId);
+  const buildBox = document.getElementById('log-build-' + jobId);
+  if (!alignBox && !buildBox) return;
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws/logs/${jobId}`);
+  activeLogSockets[jobId] = ws;
+
+  ws.onopen = () => {
+    logRetryAttempts[jobId] = 0;

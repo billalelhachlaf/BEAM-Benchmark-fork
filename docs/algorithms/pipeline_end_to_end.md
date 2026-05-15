@@ -4,7 +4,7 @@ This page explains every stage executed by BEAM-App.
 
 ## Stage 0: Job Creation (UI/API)
 
-Code: `webapp/main.py`.
+Code: `webapp/main.py` loads the app; job routes live in `webapp/modules/routes_jobs_downloads_ws.py`.
 
 - User submits a form on `/`.
 - Backend validates required fields (`class_name`, matching config, endpoint/mode constraints).
@@ -13,7 +13,7 @@ Code: `webapp/main.py`.
 
 ## Stage 1: Job Pickup (Worker)
 
-Code: `worker/run.py`.
+Code: `worker/run.py` loads the worker; execution logic lives in `worker/run_modules/`.
 
 - Worker polls `jobs.db` using `JOB_POLL_INTERVAL`.
 - It acquires a queued job if capacity allows (`MAX_CONCURRENT_JOBS`).
@@ -21,7 +21,7 @@ Code: `worker/run.py`.
 
 ## Stage 2: Alignment (WDC -> Wikidata)
 
-Code: `scripts/align.py` and `beam/pipeline.py` orchestration.
+Code: `scripts/align.py`, `scripts/align_modules/`, `beam/pipeline.py`, and `beam/pipeline_modules/`.
 
 - Loads WDC class parts (`Download/<ClassName>/`).
 - Extracts candidate values from selected WDC predicates.
@@ -36,7 +36,7 @@ Output contract:
 
 ## Stage 3: Build Generation (BEAM format)
 
-Code: `scripts/build_beam_files.py`.
+Code: `scripts/build_beam_files.py` and `scripts/build_beam_files_modules/`.
 
 Main high-level flow:
 1. Read `ent_links` inputs (`read_links`).
@@ -49,7 +49,7 @@ Main high-level flow:
 
 ## Stage 4: Persistence + Exposure
 
-Code: `webapp/main.py` endpoints.
+Code: `webapp/modules/` endpoints.
 
 - Build appears in history/dashboard.
 - User can inspect link explorer/build detail pages.

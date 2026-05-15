@@ -6,6 +6,18 @@ from pathlib import Path
 DB_PATH = (Path(__file__).resolve().parents[1] / "jobs.db")
 
 
+def _clean_owner_key(owner_key):
+    value = str(owner_key or "").strip()
+    return value or None
+
+
+def _owner_where(owner_key):
+    owner_key = _clean_owner_key(owner_key)
+    if not owner_key:
+        return "", []
+    return " AND owner_key = ?", [owner_key]
+
+
 def _connect():
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
@@ -25,6 +37,7 @@ def init_db():
             """
             CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_key TEXT,
                 status TEXT NOT NULL,
                 phase TEXT,
                 cancel_requested INTEGER DEFAULT 0,
@@ -96,6 +109,8 @@ def init_db():
         )
         # Migrations for existing DBs
         cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+        if "owner_key" not in cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN owner_key TEXT")
         if "phase" not in cols:
             conn.execute("ALTER TABLE jobs ADD COLUMN phase TEXT")
         if "cancel_requested" not in cols:
@@ -142,15 +157,16 @@ def init_db():
             conn.execute("ALTER TABLE job_events ADD COLUMN meta_json TEXT")
 
 
-def insert_job(params):
+def insert_job(params, owner_key=None):
     now = time.time()
+    owner_key = _clean_owner_key(owner_key)
     with _connect() as conn:
         cur = conn.execute(
             """
-            INSERT INTO jobs (status, params_json, created_at)
-            VALUES (?, ?, ?)
+            INSERT INTO jobs (owner_key, status, params_json, created_at)
+            VALUES (?, ?, ?, ?)
             """,
-            ("queued", json.dumps(params), now),
+            (owner_key, "queued", json.dumps(params), now),
         )
         job_id = cur.lastrowid
         conn.execute(
@@ -164,26 +180,56 @@ def insert_job(params):
         return job_id
 
 
-def get_job(job_id):
+def get_job(job_id, owner_key=None):
+    owner_where, owner_args = _owner_where(owner_key)
     with _connect() as conn:
-        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        row = conn.execute(
+            f"SELECT * FROM jobs WHERE id = ?{owner_where}",
+            [job_id] + owner_args,
+        ).fetchone()
         return row
 
 
-def list_jobs(limit=50):
+def list_jobs(limit=50, owner_key=None):
+    owner_key = _clean_owner_key(owner_key)
     with _connect() as conn:
-        rows = conn.execute(
-            "SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
+        if owner_key:
+            rows = conn.execute(
+                "SELECT * FROM jobs WHERE owner_key = ? ORDER BY id DESC LIMIT ?",
+                (owner_key, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
         return rows
 
 
-def list_jobs_by_status(status):
+def list_jobs_by_status(status, owner_key=None):
+    owner_key = _clean_owner_key(owner_key)
     with _connect() as conn:
-        rows = conn.execute(
-            "SELECT * FROM jobs WHERE status = ? ORDER BY id ASC", (status,)
-        ).fetchall()
+        if owner_key:
+            rows = conn.execute(
+                "SELECT * FROM jobs WHERE status = ? AND owner_key = ? ORDER BY id ASC",
+                (status, owner_key),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM jobs WHERE status = ? ORDER BY id ASC", (status,)
+            ).fetchall()
         return rows
+
+
+def claim_unowned_jobs(owner_key):
+    owner_key = _clean_owner_key(owner_key)
+    if not owner_key:
+        return 0
+    with _connect() as conn:
+        cur = conn.execute(
+            "UPDATE jobs SET owner_key = ? WHERE owner_key IS NULL OR owner_key = ''",
+            (owner_key,),
+        )
+        return int(cur.rowcount or 0)
 
 
 def update_job(job_id, **fields):
@@ -312,9 +358,13 @@ def delete_job(job_id):
         conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
 
 
-def delete_jobs_by_result_path(result_path):
+def delete_jobs_by_result_path(result_path, owner_key=None):
+    owner_where, owner_args = _owner_where(owner_key)
     with _connect() as conn:
-        rows = conn.execute("SELECT id FROM jobs WHERE result_path = ?", (result_path,)).fetchall()
+        rows = conn.execute(
+            f"SELECT id FROM jobs WHERE result_path = ?{owner_where}",
+            [result_path] + owner_args,
+        ).fetchall()
         for r in rows:
             jid = int(r["id"])
             conn.execute("DELETE FROM job_events WHERE job_id = ?", (jid,))

@@ -24,6 +24,118 @@ MAX_WORKERS_PER_JOB = int(os.environ.get("MAX_WORKERS_PER_JOB", str(_CPU_COUNT))
 JOB_WORKER_CPU_SHARE = float(os.environ.get("JOB_WORKER_CPU_SHARE", "0.95"))
 JOB_STUCK_TIMEOUT_S = int(os.environ.get("JOB_STUCK_TIMEOUT_S", os.environ.get("JOB_STUCK_TIMEOUT", "1800")))
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_PART_RE = re.compile(r"\b(part_\d+(?:\.[A-Za-z0-9]+)?)\b", flags=re.IGNORECASE)
+_PROGRESS_PART_RE = re.compile(r"\b(?:part|file)=\s*([^\s|]+)", flags=re.IGNORECASE)
+
+_LOG_TRANSLATIONS = (
+    ("Téléchargement/Décompression", "Download/decompress"),
+    ("Téléchargement depuis", "Downloading from"),
+    ("Téléchargement:", "Download:"),
+    ("Déjà disponible", "Already available"),
+    (".gz supprimé (déjà décompressé)", ".gz removed (already decompressed)"),
+    ("Déjà téléchargé", "Already downloaded"),
+    ("Téléchargé", "Downloaded"),
+    ("Décompression...", "Decompressing..."),
+    ("Décompressé", "Decompressed"),
+    ("Erreur décompression", "Decompression error"),
+    ("Erreur target endpoint", "Target endpoint error"),
+    ("Erreur:", "Error:"),
+    ("Découverte des parts disponibles", "Discovering available parts"),
+    ("parts trouvées", "parts found"),
+    ("parts sélectionnées", "selected parts"),
+    ("Extraction directe depuis les parts (sans graphe fusionné)", "Direct extraction from parts"),
+    ("Extraction directe", "Direct extraction"),
+    ("Filtrage des sujets par rdf:type", "Filtering subjects by rdf:type"),
+    ("Aucun sujet ne matche le rdf:type demandé", "No subjects matched the requested rdf:type"),
+    ("Sujets retenus", "Selected subjects"),
+    ("Type scan", "Type scan"),
+    ("Traitement", "Processing"),
+    ("Scan", "Scan"),
+    ("Récupération des valeurs Wikidata", "Fetching Wikidata values"),
+    ("Récupération des valeurs target", "Fetching target values"),
+    ("Requête SPARQL pour", "SPARQL query for"),
+    ("valeurs brutes distinctes", "distinct raw values"),
+    ("valeurs normalisées distinctes", "distinct normalized values"),
+    ("Statistiques (équivalent requêtes SPARQL)", "Statistics"),
+    ("Lignes totales (triplets)", "Total triples"),
+    ("IRIs distincts", "Distinct IRIs"),
+    ("Valeurs brutes distinctes", "Distinct raw values"),
+    ("Valeurs normalisées", "Normalized values"),
+    ("Distribution des longueurs (normalisées)", "Normalized length distribution"),
+    ("Exemples de valeurs", "Sample values"),
+    ("Prédicats trouvés", "Found predicates"),
+    ("Comparaison avec SPARQL", "SPARQL comparison"),
+    ("Fichiers générés dans", "Files generated in"),
+    ("Classe Wikidata", "Wikidata class"),
+    ("Propriété Wikidata", "Wikidata property"),
+    ("Classe Prop WD", "Wikidata property class"),
+    ("WDC rdf:type", "WDC rdf:type"),
+    ("Classe", "Class"),
+    ("Pattern brut", "Raw pattern"),
+    ("Pattern normalisé", "Normalized pattern"),
+    ("Pattern", "Pattern"),
+    ("Parts", "Parts"),
+    ("Workers", "Workers"),
+    ("Lignes lues", "Lines read"),
+    ("Lignes", "Lines"),
+    ("Lignes totales traitées", "Total processed lines"),
+    ("Lignes matchant le pattern", "Lines matching pattern"),
+    ("Lignes matchées", "Matched lines"),
+    ("Valeurs distinctes", "Distinct values"),
+    ("Normalisation des codes pays", "Country code normalization"),
+    ("Taux global", "Overall rate"),
+    ("Taux", "Rate"),
+    ("Stratégie: Matching exact", "Strategy: exact matching"),
+    ("Phase 1: Matching exact", "Phase 1: exact matching"),
+    ("Phase 2: Matching fuzzy supprimé", "Phase 2: fuzzy matching disabled"),
+    ("paires (exact)", "pairs (exact)"),
+    ("paires (total)", "pairs (total)"),
+    ("Linking WDC", "Linking WDC"),
+    ("Export des résultats", "Exporting results"),
+    ("Alignnement done", "Alignment done"),
+)
+
+
+def _clean_log_message(text):
+    msg = _ANSI_RE.sub("", str(text or ""))
+    msg = msg.replace("\r", "").strip()
+    # Drop color-only fragments and standalone reset bytes after ANSI removal.
+    if not msg or msg in {"[0m", "[0;31m", "[0;32m", "[0;34m", "[0;36m"}:
+        return ""
+    return re.sub(r"\s+", " ", msg)
+
+
+def _translate_log_message(text):
+    out = str(text or "")
+    for src, dst in _LOG_TRANSLATIONS:
+        out = out.replace(src, dst)
+    return out
+
+
+def _extract_part_name(text):
+    msg = str(text or "")
+    match = _PROGRESS_PART_RE.search(msg)
+    if match:
+        return Path(match.group(1)).name
+    match = _PART_RE.search(msg)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _message_already_has_part(text):
+    msg = str(text or "")
+    return bool(_PROGRESS_PART_RE.search(msg) or _PART_RE.search(msg))
+
+
+def _with_part_context(text, part_name):
+    msg = str(text or "")
+    part = str(part_name or "").strip()
+    if not msg or not part or _message_already_has_part(msg):
+        return msg
+    return f"{msg} | part: {part}"
+
 
 def _normalize_eta_hint(value):
     raw = str(value or "").strip()
@@ -627,32 +739,9 @@ def _run_job(job_id, workers):
                 self._build_batch_samples = deque(maxlen=20)
                 self._job_started_at = time.time()
                 self._eta_baselines = dict(baselines or {})
-                self._translations = (
-                    ("Téléchargement/Décompression", "Download/Decompress"),
-                    ("Téléchargement depuis", "Downloading from"),
-                    ("Téléchargement:", "Download:"),
-                    ("Déjà disponible", "Already available"),
-                    (".gz supprimé (déjà décompressé)", ".gz removed (already decompressed)"),
-                    ("Déjà téléchargé", "Already downloaded"),
-                    ("Téléchargé", "Downloaded"),
-                    ("Décompression...", "Decompressing..."),
-                    ("Décompressé", "Decompressed"),
-                    ("Erreur décompression", "Decompression error"),
-                    ("Erreur:", "Error:"),
-                    ("Extraction directe", "Direct extraction"),
-                    ("Récupération des valeurs Wikidata", "Fetching Wikidata values"),
-                    ("Linking WDC", "Linking WDC"),
-                    ("Export des résultats", "Exporting results"),
-                    ("Lignes lues", "Lines read"),
-                    ("Valeurs distinctes", "Distinct values"),
-                    ("parts sélectionnées", "parts selected"),
-                )
 
             def _to_english(self, msg):
-                out = msg
-                for src, dst in self._translations:
-                    out = out.replace(src, dst)
-                return out
+                return _translate_log_message(msg)
 
             def _emit_event(self, msg, kind="log", step=None, pct=None, worker=None, meta=None):
                 try:
@@ -725,10 +814,20 @@ def _run_job(job_id, workers):
                     self._buf = ""
 
             def _emit(self, line):
-                msg = line.strip()
+                msg = _clean_log_message(line)
                 if not msg:
                     return
                 msg = self._to_english(msg)
+                detected_part = _extract_part_name(msg)
+                if detected_part:
+                    self._current_file = detected_part
+                if self._phase == "align" and self._current_file and (
+                    msg.startswith("Lines read:")
+                    or "Progress:" in msg
+                    or "Matches:" in msg
+                    or "Distinct values:" in msg
+                ):
+                    msg = _with_part_context(msg, self._current_file)
                 self._last_emit_ts = time.time()
                 pct = _extract_progress_pct(msg)
                 kind = "progress" if (
@@ -813,20 +912,27 @@ def _run_job(job_id, workers):
                 # step detection
                 step = None
                 current_file = None
-                if ("Download/Decompress" in msg) or ("Téléchargement/Décompression" in msg):
+                if "Download/decompress" in msg:
                     step = "download"
-                elif ("Direct extraction" in msg) or ("Extraction directe" in msg):
+                elif "Direct extraction" in msg:
                     step = "extract"
+                elif "Type scan:" in msg:
+                    step = "type_scan"
+                    m2 = re.search(r"Type scan:\s*(.+)$", msg)
+                    if m2:
+                        current_file = Path(m2.group(1).strip()).name
                 elif "Scan:" in msg:
                     step = "scan"
-                    m2 = re.search(r"Scan:\\s*(.+)$", msg)
+                    m2 = re.search(r"Scan:\s*(.+)$", msg)
                     if m2:
-                        current_file = m2.group(1).strip()
-                elif ("Fetching Wikidata values" in msg) or ("Récupération des valeurs Wikidata" in msg):
+                        current_file = Path(m2.group(1).strip()).name
+                elif "Fetching Wikidata values" in msg:
                     step = "wikidata"
+                elif "Fetching target values" in msg:
+                    step = "target"
                 elif "Linking WDC" in msg:
                     step = "linking"
-                elif ("Exporting results" in msg) or ("Export des résultats" in msg):
+                elif "Exporting results" in msg:
                     step = "export"
                 elif self._phase == "build" and msg.startswith("[WDC_DEDUP]"):
                     step = "build_wdc_dedup"
@@ -834,10 +940,11 @@ def _run_job(job_id, workers):
                     step = "build_wdc"
                 elif self._phase == "build" and msg.startswith("[WD]"):
                     step = "build_wd"
-                if step or current_file:
+                if step or current_file or detected_part:
                     if step:
                         self._current_step = step
-                    if current_file:
+                    if current_file or detected_part:
+                        current_file = current_file or detected_part
                         self._current_file = current_file
                     try:
                         db.update_job(self.jid, current_step=step, current_file=current_file)

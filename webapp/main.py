@@ -20,13 +20,13 @@ from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Form, HTTPException
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Form, HTTPException, Response
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
-from beam import db
+from beam import db, ownership
 from beam.wdc_classes import fetch_wdc_classes, load_wdc_classes_catalog, save_wdc_classes_catalog
 from scripts import align as align_script
 
@@ -34,7 +34,7 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
-TUTORIAL_MD_PATH = Path("docs") / "user" / "tutorial.md"
+TUTORIAL_MD_PATH = Path(__file__).resolve().parents[1] / "docs" / "user" / "tutorial.md"
 
 WDC_PARTS_BASE_URL = "https://data.dws.informatik.uni-mannheim.de/structureddata/2024-12/quads/classspecific/"
 _PART_HREF_RE = re.compile(r"^part_(\d+)\.gz$", re.IGNORECASE)
@@ -59,6 +59,7 @@ _SAKEY_EXEC_SEMAPHORE = Semaphore(_SAKEY_MAX_CONCURRENT)
 _SAKEY_RECONCILE_LOCK = Lock()
 _SAKEY_RECONCILED = False
 _SAKEY_APP_BOOT_TS = time.time()
+_BUILD_OWNER_FILENAME = ".beam_owner"
 
 
 PRESETS = {
@@ -701,8 +702,38 @@ def _filter_presets_by_mode(test_mode: bool):
     return {k: v for k, v in PRESETS.items() if _is_test_preset(v) == desired}
 
 
-def _get_recent_presets(limit=50, test_mode: Optional[bool] = None):
-    rows = db.list_jobs(limit=limit)
+def _get_or_create_owner_key(request):
+    owner_key, created = ownership.get_or_create_owner_key(request)
+    try:
+        db.claim_unowned_jobs(owner_key)
+    except Exception:
+        pass
+    return owner_key, created
+
+
+def _set_owner_cookie_if_needed(response, request, owner_key):
+    if not ownership.get_request_owner_key(request):
+        ownership.set_owner_cookie(response, owner_key)
+    return response
+
+
+def _redirect_with_owner(request, url="/", status_code=303):
+    owner_key, _ = _get_or_create_owner_key(request)
+    response = RedirectResponse(url=url, status_code=status_code)
+    return _set_owner_cookie_if_needed(response, request, owner_key)
+
+
+def _insert_job_for_owner(params, owner_key):
+    try:
+        return db.insert_job(params, owner_key=owner_key)
+    except TypeError as exc:
+        if "owner_key" not in str(exc):
+            raise
+        return db.insert_job(params)
+
+
+def _get_recent_presets(limit=50, test_mode: Optional[bool] = None, owner_key: Optional[str] = None):
+    rows = db.list_jobs(limit=limit, owner_key=owner_key)
     recent = []
     seen = set()
     for r in rows:
@@ -4156,7 +4187,105 @@ def _build_result_path_aliases(build_dir: Path):
     return {a for a in normalized if a}
 
 
-def _delete_jobs_for_build_dir(build_dir: Path, scan_limit: int = 50000) -> int:
+def _build_dir_path_keys(build_dir: Path):
+    aliases = _build_result_path_aliases(build_dir)
+    keys = set(aliases)
+    for alias in aliases:
+        keys.add(os.path.normpath(alias))
+        keys.add(_normalized_path_text(alias))
+    keys.add(_normalized_path_text(str(build_dir)))
+    return {k for k in keys if _clean_text(k)}
+
+
+def _owned_build_path_keys(owner_key: Optional[str], scan_limit: int = 50000):
+    keys = set()
+    if not owner_key:
+        return keys
+    for row in db.list_jobs(limit=scan_limit, owner_key=owner_key):
+        try:
+            result_path = _clean_text(row["result_path"])
+        except Exception:
+            result_path = ""
+        if not result_path:
+            continue
+        keys.add(result_path)
+        keys.add(os.path.normpath(result_path))
+        keys.add(_normalized_path_text(result_path))
+    return {k for k in keys if _clean_text(k)}
+
+
+def _build_owner_file(build_dir: Path) -> Path:
+    return build_dir / _BUILD_OWNER_FILENAME
+
+
+def _read_build_owner_key(build_dir: Path):
+    try:
+        return ownership.normalize_owner_key(_build_owner_file(build_dir).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _write_build_owner_key(build_dir: Path, owner_key: Optional[str]):
+    owner_key = ownership.normalize_owner_key(owner_key)
+    if not owner_key:
+        return
+    try:
+        _build_owner_file(build_dir).write_text(owner_key, encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _build_has_any_job_reference(build_dir: Path, scan_limit: int = 50000) -> bool:
+    path_keys = _build_dir_path_keys(build_dir)
+    if not path_keys:
+        return False
+    for row in db.list_jobs(limit=scan_limit):
+        try:
+            result_path = _clean_text(row["result_path"])
+        except Exception:
+            result_path = ""
+        if not result_path:
+            continue
+        row_keys = {result_path, os.path.normpath(result_path), _normalized_path_text(result_path)}
+        if path_keys & row_keys:
+            return True
+    return False
+
+
+def _build_is_owned_by_keys(
+    build_dir: Path,
+    owned_keys: set,
+    owner_key: Optional[str] = None,
+    claim_unowned: bool = False,
+) -> bool:
+    build_owner = _read_build_owner_key(build_dir)
+    owner_key = ownership.normalize_owner_key(owner_key)
+    if build_owner:
+        return bool(owner_key and build_owner == owner_key)
+    if not owned_keys:
+        if claim_unowned and owner_key and not _build_has_any_job_reference(build_dir):
+            _write_build_owner_key(build_dir, owner_key)
+            return True
+        return False
+    if _build_dir_path_keys(build_dir) & owned_keys:
+        _write_build_owner_key(build_dir, owner_key)
+        return True
+    if claim_unowned and owner_key and not _build_has_any_job_reference(build_dir):
+        _write_build_owner_key(build_dir, owner_key)
+        return True
+    return False
+
+
+def _owner_can_access_build(owner_key: Optional[str], build_dir: Path, claim_unowned: bool = True) -> bool:
+    return _build_is_owned_by_keys(
+        build_dir,
+        _owned_build_path_keys(owner_key),
+        owner_key=owner_key,
+        claim_unowned=claim_unowned,
+    )
+
+
+def _delete_jobs_for_build_dir(build_dir: Path, scan_limit: int = 50000, owner_key: Optional[str] = None) -> int:
     aliases = _build_result_path_aliases(build_dir)
     target_norm = _normalized_path_text(str(build_dir))
     to_delete_ids = set()
@@ -4164,12 +4293,12 @@ def _delete_jobs_for_build_dir(build_dir: Path, scan_limit: int = 50000) -> int:
     # Delete exact-path variants without relying on recency limits.
     for alias in aliases:
         try:
-            db.delete_jobs_by_result_path(alias)
+            db.delete_jobs_by_result_path(alias, owner_key=owner_key)
         except Exception:
             continue
 
     # Fallback for unusual historical path spellings that still point to the same directory.
-    for row in db.list_jobs(limit=scan_limit):
+    for row in db.list_jobs(limit=scan_limit, owner_key=owner_key):
         try:
             rp = _clean_text(row["result_path"])
         except Exception:
@@ -4199,11 +4328,11 @@ def _bool_from_any(value):
     return text in {"1", "true", "yes", "on"}
 
 
-def _find_job_params_by_result_path(result_path: str, limit: int = 4000):
+def _find_job_params_by_result_path(result_path: str, limit: int = 4000, owner_key: Optional[str] = None):
     target = str(result_path or "").strip()
     if not target:
         return None
-    for row in db.list_jobs(limit=limit):
+    for row in db.list_jobs(limit=limit, owner_key=owner_key):
         rp = str(row["result_path"] or "").strip()
         if rp != target:
             continue
@@ -4213,13 +4342,13 @@ def _find_job_params_by_result_path(result_path: str, limit: int = 4000):
     return None
 
 
-def _rerun_params_from_build_config(build_dir: Path, class_name: str):
+def _rerun_params_from_build_config(build_dir: Path, class_name: str, owner_key: Optional[str] = None):
     cfg_path = build_dir / "BUILD_CONFIG.json"
     cfg = {}
     if cfg_path.exists() and cfg_path.is_file():
         cfg = _safe_json_loads(cfg_path.read_text(encoding="utf-8"))
     cfg = cfg if isinstance(cfg, dict) else {}
-    fallback = _find_job_params_by_result_path(str(build_dir))
+    fallback = _find_job_params_by_result_path(str(build_dir), owner_key=owner_key)
     fallback = fallback if isinstance(fallback, dict) else {}
 
     def _pick(key, default=""):
@@ -4284,12 +4413,17 @@ def _looks_like_skipped_build_reason(text: Optional[str]) -> bool:
     return ("build skipped" in msg) or ("no alignments found" in msg)
 
 
-def _build_dashboard_state(job_limit: int = 50, build_limit: int = 200, test_mode: Optional[bool] = None):
-    all_jobs = [dict(j) for j in db.list_jobs(limit=job_limit)]
+def _build_dashboard_state(
+    job_limit: int = 50,
+    build_limit: int = 200,
+    test_mode: Optional[bool] = None,
+    owner_key: Optional[str] = None,
+):
+    all_jobs = [dict(j) for j in db.list_jobs(limit=job_limit, owner_key=owner_key)]
     jobs_by_id = {j["id"]: j for j in all_jobs}
     # Always include truly active jobs even if they are outside the recency window.
     for st in ("running", "queued"):
-        for row in db.list_jobs_by_status(st):
+        for row in db.list_jobs_by_status(st, owner_key=owner_key):
             jid = row["id"]
             if jid not in jobs_by_id:
                 jobs_by_id[jid] = dict(row)
@@ -4302,7 +4436,16 @@ def _build_dashboard_state(job_limit: int = 50, build_limit: int = 200, test_mod
             if _is_test_class_name(all_jobs_params.get(j["id"], {}).get("class_name")) == desired
         ]
     active_jobs = [j for j in all_jobs if j["status"] in {"running", "queued"}]
-    builds = _scan_builds(limit=build_limit)
+    owned_build_keys = _owned_build_path_keys(owner_key)
+    builds = [
+        b for b in _scan_builds(limit=build_limit)
+        if _build_is_owned_by_keys(
+            Path(b.get("path") or ""),
+            owned_build_keys,
+            owner_key=owner_key,
+            claim_unowned=True,
+        )
+    ]
     if test_mode is not None:
         desired = bool(test_mode)
         builds = [b for b in builds if _is_test_class_name(b.get("class_name")) == desired]
@@ -4419,6 +4562,7 @@ def _render_index_page(
     form_error: Optional[str] = None,
     test_mode: Optional[str] = None,
 ):
+    owner_key, _ = _get_or_create_owner_key(request)
     is_test_mode = _bool_from_any(test_mode)
     # Seed from local catalog first. Do not auto-scrape remote stats on startup.
     if not db.list_wdc_classes():
@@ -4439,7 +4583,7 @@ def _render_index_page(
             selected_preset = preset
 
     if recent:
-        job = db.get_job(recent)
+        job = db.get_job(recent, owner_key=owner_key)
         if job:
             try:
                 params = json.loads(job["params_json"])
@@ -4462,8 +4606,8 @@ def _render_index_page(
     if form.get("class_name") and form.get("class_name") in class_meta:
         class_parts_info = _build_class_parts_info(form["class_name"])
 
-    recent_presets = _get_recent_presets(test_mode=is_test_mode)
-    dashboard = _build_dashboard_state(job_limit=50, build_limit=200, test_mode=is_test_mode)
+    recent_presets = _get_recent_presets(test_mode=is_test_mode, owner_key=owner_key)
+    dashboard = _build_dashboard_state(job_limit=50, build_limit=200, test_mode=is_test_mode, owner_key=owner_key)
     jobs = dashboard["jobs_for_panel"]
     builds = dashboard["builds"]
     jobs_outputs = {j["id"]: dashboard["jobs_outputs"][j["id"]] for j in jobs}
@@ -4471,7 +4615,7 @@ def _render_index_page(
     jobs_params = {j["id"]: dashboard["jobs_params"][j["id"]] for j in jobs}
     jobs_subjobs = {j["id"]: dashboard["jobs_subjobs"][j["id"]] for j in jobs}
 
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request,
         "index.html",
         {
@@ -4496,6 +4640,7 @@ def _render_index_page(
             ],
         },
     )
+    return _set_owner_cookie_if_needed(response, request, owner_key)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -4697,20 +4842,21 @@ def build_detail_page(
     build_name: str,
     test_mode: Optional[str] = None,
 ):
+    owner_key, _ = _get_or_create_owner_key(request)
     is_test_mode = _bool_from_any(test_mode)
     build_dir = _resolve_build_dir(class_name, build_name)
-    if not build_dir:
+    if not build_dir or not _owner_can_access_build(owner_key, build_dir):
         query = "test_mode=1&" if is_test_mode else ""
         query += f"form_error={quote_plus('Build not found.')}"
-        return RedirectResponse(url=f"/?{query}", status_code=303)
+        return _redirect_with_owner(request, url=f"/?{query}", status_code=303)
 
     build = _build_summary_from_dir(build_dir)
     if not build:
         query = "test_mode=1&" if is_test_mode else ""
         query += f"form_error={quote_plus('Build not found.')}"
-        return RedirectResponse(url=f"/?{query}", status_code=303)
+        return _redirect_with_owner(request, url=f"/?{query}", status_code=303)
 
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request,
         "build_detail.html",
         {
@@ -4718,6 +4864,7 @@ def build_detail_page(
             "is_test_mode": is_test_mode,
         },
     )
+    return _set_owner_cookie_if_needed(response, request, owner_key)
 
 
 @app.get("/builds/{class_name}/{build_name}/links", response_class=HTMLResponse)
@@ -4731,12 +4878,13 @@ def build_links_page(
     limit: int = 30,
     test_mode: Optional[str] = None,
 ):
+    owner_key, _ = _get_or_create_owner_key(request)
     is_test_mode = _bool_from_any(test_mode)
     build_dir = _resolve_build_dir(class_name, build_name)
-    if not build_dir:
+    if not build_dir or not _owner_can_access_build(owner_key, build_dir):
         query = "test_mode=1&" if is_test_mode else ""
         query += f"form_error={quote_plus('Build not found.')}"
-        return RedirectResponse(url=f"/?{query}", status_code=303)
+        return _redirect_with_owner(request, url=f"/?{query}", status_code=303)
 
     build = {
         "class_name": class_name,
@@ -4749,7 +4897,7 @@ def build_links_page(
     if not variant_dir or not variant_name:
         query = "test_mode=1&" if is_test_mode else ""
         query += f"form_error={quote_plus('No link files available for this build.')}"
-        return RedirectResponse(url=f"/?{query}", status_code=303)
+        return _redirect_with_owner(request, url=f"/?{query}", status_code=303)
 
     ent_links_path = variant_dir / "ent_links"
     page = _scan_ent_links_page(ent_links_path, offset=offset, limit=limit, query=q)
@@ -4770,7 +4918,7 @@ def build_links_page(
     if not available_variants:
         available_variants = [{"name": variant_name, "has_ent_links": ent_links_path.exists()}]
 
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request,
         "link_explorer.html",
         {
@@ -4788,10 +4936,13 @@ def build_links_page(
             "linking_combinations": build.get("linking_combinations", []),
         },
     )
+    return _set_owner_cookie_if_needed(response, request, owner_key)
 
 
 @app.get("/api/builds/{class_name}/{build_name}/links")
 def build_links_api(
+    request: Request,
+    response: Response,
     class_name: str,
     build_name: str,
     variant: Optional[str] = None,
@@ -4799,8 +4950,10 @@ def build_links_api(
     offset: int = 0,
     limit: int = 30,
 ):
+    owner_key, _ = _get_or_create_owner_key(request)
+    _set_owner_cookie_if_needed(response, request, owner_key)
     build_dir = _resolve_build_dir(class_name, build_name)
-    if not build_dir:
+    if not build_dir or not _owner_can_access_build(owner_key, build_dir):
         raise HTTPException(status_code=404, detail="Build not found.")
     variant_dir, variant_name = _resolve_link_explorer_variant_dir(build_dir, variant=variant)
     if not variant_dir or not variant_name:
@@ -4824,14 +4977,18 @@ def build_links_api(
 
 @app.get("/api/builds/{class_name}/{build_name}/link")
 def build_link_detail_api(
+    request: Request,
+    response: Response,
     class_name: str,
     build_name: str,
     idx: int,
     variant: Optional[str] = None,
     wait_ms: int = 250,
 ):
+    owner_key, _ = _get_or_create_owner_key(request)
+    _set_owner_cookie_if_needed(response, request, owner_key)
     build_dir = _resolve_build_dir(class_name, build_name)
-    if not build_dir:
+    if not build_dir or not _owner_can_access_build(owner_key, build_dir):
         raise HTTPException(status_code=404, detail="Build not found.")
     variant_dir, variant_name = _resolve_link_explorer_variant_dir(build_dir, variant=variant)
     if not variant_dir or not variant_name:
@@ -4867,6 +5024,8 @@ def build_link_detail_api(
 
 @app.get("/api/builds/{class_name}/{build_name}/node")
 def build_link_node_api(
+    request: Request,
+    response: Response,
     class_name: str,
     build_name: str,
     node: str,
@@ -4876,8 +5035,10 @@ def build_link_node_api(
     node_value = _clean_text(node)
     if not node_value:
         raise HTTPException(status_code=400, detail="node is required.")
+    owner_key, _ = _get_or_create_owner_key(request)
+    _set_owner_cookie_if_needed(response, request, owner_key)
     build_dir = _resolve_build_dir(class_name, build_name)
-    if not build_dir:
+    if not build_dir or not _owner_can_access_build(owner_key, build_dir):
         raise HTTPException(status_code=404, detail="Build not found.")
     variant_dir, variant_name = _resolve_link_explorer_variant_dir(build_dir, variant=variant)
     if not variant_dir or not variant_name:
@@ -4894,10 +5055,23 @@ def build_link_node_api(
 
 
 @app.get("/api/dashboard")
-def dashboard_api(job_limit: int = 80, build_limit: int = 200, test_mode: Optional[bool] = None):
+def dashboard_api(
+    request: Request,
+    response: Response,
+    job_limit: int = 80,
+    build_limit: int = 200,
+    test_mode: Optional[bool] = None,
+):
+    owner_key, _ = _get_or_create_owner_key(request)
+    _set_owner_cookie_if_needed(response, request, owner_key)
     job_limit = max(1, min(int(job_limit), 200))
     build_limit = max(1, min(int(build_limit), 200))
-    dashboard = _build_dashboard_state(job_limit=job_limit, build_limit=build_limit, test_mode=test_mode)
+    dashboard = _build_dashboard_state(
+        job_limit=job_limit,
+        build_limit=build_limit,
+        test_mode=test_mode,
+        owner_key=owner_key,
+    )
 
     jobs = []
     for j in dashboard["all_jobs"]:
@@ -4932,7 +5106,7 @@ def dashboard_api(job_limit: int = 80, build_limit: int = 200, test_mode: Option
             }
         )
 
-    return {
+    response = {
         "server_ts": time.time(),
         "job_count": len(jobs),
         "active_job_count": len(dashboard["active_jobs"]),
@@ -4943,6 +5117,7 @@ def dashboard_api(job_limit: int = 80, build_limit: int = 200, test_mode: Option
         "jobs": jobs,
         "builds": builds,
     }
+    return response
 
 
 @app.get("/api/class_parts/{class_name}")
@@ -4992,12 +5167,13 @@ def preflight_api(
 
 
 @app.post("/jobs/{job_id}/cancel")
-def cancel_job(job_id: int):
-    job = db.get_job(job_id)
+def cancel_job(request: Request, job_id: int):
+    owner_key, _ = _get_or_create_owner_key(request)
+    job = db.get_job(job_id, owner_key=owner_key)
     if not job:
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request)
     if job["status"] not in {"running", "queued"}:
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request)
     db.request_cancel(job_id)
     db.request_cancel_subjob(job_id, "align")
     db.request_cancel_subjob(job_id, "build")
@@ -5005,21 +5181,22 @@ def cancel_job(job_id: int):
         db.update_subjob_by_type(job_id, "align", status="cancelled", ended_at=time.time())
         db.update_subjob_by_type(job_id, "build", status="cancelled", ended_at=time.time())
     db.insert_event(job_id, "system", "Cancel requested (job)")
-    return RedirectResponse(url="/", status_code=303)
+    return _redirect_with_owner(request)
 
 
 @app.post("/jobs/{job_id}/cancel_subjob/{subjob_type}")
-def cancel_subjob(job_id: int, subjob_type: str):
+def cancel_subjob(request: Request, job_id: int, subjob_type: str):
+    owner_key, _ = _get_or_create_owner_key(request)
     if subjob_type not in {"align", "build"}:
-        return RedirectResponse(url="/", status_code=303)
-    job = db.get_job(job_id)
+        return _redirect_with_owner(request)
+    job = db.get_job(job_id, owner_key=owner_key)
     if not job:
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request)
     if job["status"] not in {"running", "queued"}:
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request)
     sj = db.get_subjob(job_id, subjob_type)
     if not sj or sj["status"] not in {"running", "queued"}:
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request)
 
     db.request_cancel_subjob(job_id, subjob_type)
     if subjob_type == "align":
@@ -5039,91 +5216,97 @@ def cancel_subjob(job_id: int, subjob_type: str):
             db.update_subjob_by_type(job_id, "build", status="cancelled", ended_at=time.time())
         else:
             db.update_subjob_by_type(job_id, "build", status="cancelled", ended_at=time.time())
-    return RedirectResponse(url="/", status_code=303)
+    return _redirect_with_owner(request)
 
 
 @app.post("/jobs/{job_id}/rerun")
-def rerun_job(job_id: int):
-    job = db.get_job(job_id)
+def rerun_job(request: Request, job_id: int):
+    owner_key, _ = _get_or_create_owner_key(request)
+    job = db.get_job(job_id, owner_key=owner_key)
     if not job:
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request)
     try:
         params = json.loads(job["params_json"])
     except Exception:
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request)
     # Always enforce one-to-one behavior in reruns.
     params["strict_duplicate_key_filter"] = True
-    db.insert_job(params)
-    return RedirectResponse(url="/", status_code=303)
+    _insert_job_for_owner(params, owner_key)
+    return _redirect_with_owner(request)
 
 
 @app.post("/jobs/{job_id}/rerun_nocache")
-def rerun_job_nocache(job_id: int):
-    job = db.get_job(job_id)
+def rerun_job_nocache(request: Request, job_id: int):
+    owner_key, _ = _get_or_create_owner_key(request)
+    job = db.get_job(job_id, owner_key=owner_key)
     if not job:
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request)
     try:
         params = json.loads(job["params_json"])
     except Exception:
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request)
     # Always enforce one-to-one behavior in reruns.
     params["strict_duplicate_key_filter"] = True
     params["force_align"] = True
     params["skip_build"] = False
     params.pop("require_cached_align", None)
-    db.insert_job(params)
-    return RedirectResponse(url="/", status_code=303)
+    _insert_job_for_owner(params, owner_key)
+    return _redirect_with_owner(request)
 
 
 @app.post("/jobs/{job_id}/rerun_align")
-def rerun_align(job_id: int):
-    job = db.get_job(job_id)
+def rerun_align(request: Request, job_id: int):
+    owner_key, _ = _get_or_create_owner_key(request)
+    job = db.get_job(job_id, owner_key=owner_key)
     if not job:
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request)
     try:
         params = json.loads(job["params_json"])
     except Exception:
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request)
     # Always enforce one-to-one behavior in reruns.
     params["strict_duplicate_key_filter"] = True
     params["skip_build"] = True
-    db.insert_job(params)
-    return RedirectResponse(url="/", status_code=303)
+    _insert_job_for_owner(params, owner_key)
+    return _redirect_with_owner(request)
 
 
 @app.post("/jobs/{job_id}/rerun_build")
-def rerun_build(job_id: int):
-    job = db.get_job(job_id)
+def rerun_build(request: Request, job_id: int):
+    owner_key, _ = _get_or_create_owner_key(request)
+    job = db.get_job(job_id, owner_key=owner_key)
     if not job:
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request)
     try:
         params = json.loads(job["params_json"])
     except Exception:
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request)
     # Always enforce one-to-one behavior in reruns.
     params["strict_duplicate_key_filter"] = True
     params["require_cached_align"] = True
     params["skip_build"] = False
-    db.insert_job(params)
-    return RedirectResponse(url="/", status_code=303)
+    _insert_job_for_owner(params, owner_key)
+    return _redirect_with_owner(request)
 
 
 @app.post("/jobs/{job_id}/delete")
-def delete_job(job_id: int):
-    job = db.get_job(job_id)
+def delete_job(request: Request, job_id: int):
+    owner_key, _ = _get_or_create_owner_key(request)
+    job = db.get_job(job_id, owner_key=owner_key)
     if not job:
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request)
     # Never delete active jobs to avoid orphaned worker processes.
     if job["status"] in {"running", "queued"}:
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request)
     db.delete_job(job_id)
-    return RedirectResponse(url="/", status_code=303)
+    return _redirect_with_owner(request)
 
 
 @app.post("/jobs/delete_stopped")
-def delete_stopped_jobs():
+def delete_stopped_jobs(request: Request):
+    owner_key, _ = _get_or_create_owner_key(request)
     # Remove only non-active jobs; keep running/queued jobs intact.
-    for row in db.list_jobs(limit=50000):
+    for row in db.list_jobs(limit=50000, owner_key=owner_key):
         status = str(row["status"] or "").strip().lower()
         if status in {"running", "queued"}:
             continue
@@ -5131,11 +5314,12 @@ def delete_stopped_jobs():
             db.delete_job(int(row["id"]))
         except Exception:
             continue
-    return RedirectResponse(url="/", status_code=303)
+    return _redirect_with_owner(request)
 
 
 @app.post("/jobs")
 def create_job(
+    request: Request,
     matching_mode: str = Form("property"),
     class_name: str = Form(...),
     parts_spec: str = Form(""),
@@ -5153,6 +5337,7 @@ def create_job(
     force_align: Optional[str] = Form(None),
     use_local_only: Optional[str] = Form(None),
 ):
+    owner_key, _ = _get_or_create_owner_key(request)
     raw_params = {
         "matching_mode": _clean_text(matching_mode),
         "class_name": _clean_text(class_name),
@@ -5174,9 +5359,9 @@ def create_job(
     }
     params, validation_error = _validate_and_normalize_job_params(raw_params)
     if validation_error:
-        return RedirectResponse(url=f"/?form_error={quote_plus(validation_error)}", status_code=303)
-    db.insert_job(params)
-    return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request, url=f"/?form_error={quote_plus(validation_error)}", status_code=303)
+    _insert_job_for_owner(params, owner_key)
+    return _redirect_with_owner(request)
 
 
 @app.get("/refresh_classes")
@@ -5190,10 +5375,11 @@ def refresh_classes():
 
 
 @app.get("/builds/{class_name}/{build_name}/download")
-def download_build(class_name: str, build_name: str):
+def download_build(request: Request, class_name: str, build_name: str):
+    owner_key, _ = _get_or_create_owner_key(request)
     build_dir = _resolve_build_dir(class_name, build_name)
-    if not build_dir:
-        return RedirectResponse(url="/", status_code=303)
+    if not build_dir or not _owner_can_access_build(owner_key, build_dir):
+        return _redirect_with_owner(request)
     data_root = Path("data").resolve()
     build_config = _load_build_config(build_dir)
     endpoint_token = _endpoint_filename_token(build_config)
@@ -5215,10 +5401,11 @@ def download_build(class_name: str, build_name: str):
 
 
 @app.get("/builds/{class_name}/{build_name}/sakey/download/{artifact_idx}")
-def download_sakey_artifact(class_name: str, build_name: str, artifact_idx: int):
+def download_sakey_artifact(request: Request, class_name: str, build_name: str, artifact_idx: int):
+    owner_key, _ = _get_or_create_owner_key(request)
     build_dir = _resolve_build_dir(class_name, build_name)
-    if not build_dir:
-        return RedirectResponse(url="/", status_code=303)
+    if not build_dir or not _owner_can_access_build(owner_key, build_dir):
+        return _redirect_with_owner(request)
     path = _resolve_sakey_artifact(build_dir, artifact_idx)
     if not path:
         raise HTTPException(status_code=404, detail="SAKEY artifact not found.")
@@ -5237,7 +5424,8 @@ def download_selected_builds_get():
 
 @app.post("/builds/download_selected")
 @app.post("/builds/download_selected/")
-def download_selected_builds(selected_builds: str = Form("[]")):
+def download_selected_builds(request: Request, selected_builds: str = Form("[]")):
+    owner_key, _ = _get_or_create_owner_key(request)
     try:
         parsed = json.loads(_clean_text(selected_builds) or "[]")
     except Exception:
@@ -5266,7 +5454,7 @@ def download_selected_builds(selected_builds: str = Form("[]")):
             continue
         unique_keys.add(key)
         build_dir = _resolve_build_dir(class_name, build_name)
-        if not build_dir:
+        if not build_dir or not _owner_can_access_build(owner_key, build_dir):
             continue
         build_config = _load_build_config(build_dir)
         endpoint_token = _endpoint_filename_token(build_config)
@@ -5276,7 +5464,7 @@ def download_selected_builds(selected_builds: str = Form("[]")):
         selected_dirs.append((class_name, build_name, build_dir, folder_prefix))
 
     if not selected_dirs:
-        return RedirectResponse(url="/?form_error=No+valid+build+selected+for+download.", status_code=303)
+        return _redirect_with_owner(request, url="/?form_error=No+valid+build+selected+for+download.", status_code=303)
 
     data_root = Path("data").resolve()
     fd, zip_path = tempfile.mkstemp(prefix="beam_selected_builds_", suffix=".zip")
@@ -5306,20 +5494,22 @@ def download_selected_builds(selected_builds: str = Form("[]")):
 
 
 @app.post("/builds/{class_name}/{build_name}/delete")
-def delete_build(class_name: str, build_name: str):
+def delete_build(request: Request, class_name: str, build_name: str):
+    owner_key, _ = _get_or_create_owner_key(request)
     build_dir = _resolve_build_dir(class_name, build_name)
-    if not build_dir:
-        return RedirectResponse(url="/", status_code=303)
+    if not build_dir or not _owner_can_access_build(owner_key, build_dir):
+        return _redirect_with_owner(request)
     try:
-        _delete_jobs_for_build_dir(build_dir)
+        _delete_jobs_for_build_dir(build_dir, owner_key=owner_key)
     except Exception:
         pass
     shutil.rmtree(build_dir, ignore_errors=True)
-    return RedirectResponse(url="/", status_code=303)
+    return _redirect_with_owner(request)
 
 
 @app.post("/builds/purge_low_links")
-def purge_low_link_builds(max_links: int = Form(10)):
+def purge_low_link_builds(request: Request, max_links: int = Form(10)):
+    owner_key, _ = _get_or_create_owner_key(request)
     try:
         threshold = int(max_links)
     except Exception:
@@ -5328,7 +5518,11 @@ def purge_low_link_builds(max_links: int = Form(10)):
 
     purged = 0
     # Use a high scan limit so this action can clean the full history.
+    owned_build_keys = _owned_build_path_keys(owner_key)
     for build in _scan_builds(limit=100000):
+        build_path = Path(build.get("path") or "")
+        if not _build_is_owned_by_keys(build_path, owned_build_keys, owner_key=owner_key, claim_unowned=True):
+            continue
         class_name = str(build.get("class_name") or "").strip()
         build_name = str(build.get("build_name") or "").strip()
         if not class_name or not build_name:
@@ -5343,39 +5537,41 @@ def purge_low_link_builds(max_links: int = Form(10)):
         if links_count >= threshold:
             continue
         build_dir = _resolve_build_dir(class_name, build_name)
-        if not build_dir:
+        if not build_dir or not _owner_can_access_build(owner_key, build_dir):
             continue
         try:
-            _delete_jobs_for_build_dir(build_dir)
+            _delete_jobs_for_build_dir(build_dir, owner_key=owner_key)
         except Exception:
             pass
         shutil.rmtree(build_dir, ignore_errors=True)
         purged += 1
-    return RedirectResponse(url=f"/?purged={purged}", status_code=303)
+    return _redirect_with_owner(request, url=f"/?purged={purged}", status_code=303)
 
 
 @app.post("/builds/{class_name}/{build_name}/rerun")
-def rerun_build_from_build_card(class_name: str, build_name: str):
+def rerun_build_from_build_card(request: Request, class_name: str, build_name: str):
+    owner_key, _ = _get_or_create_owner_key(request)
     build_dir = _resolve_build_dir(class_name, build_name)
-    if not build_dir:
-        return RedirectResponse(url="/", status_code=303)
+    if not build_dir or not _owner_can_access_build(owner_key, build_dir):
+        return _redirect_with_owner(request)
     try:
-        params, validation_error = _rerun_params_from_build_config(build_dir, class_name)
+        params, validation_error = _rerun_params_from_build_config(build_dir, class_name, owner_key=owner_key)
         if validation_error:
             msg = f"Cannot rerun build: {validation_error}"
-            return RedirectResponse(url=f"/?form_error={quote_plus(msg)}", status_code=303)
-        db.insert_job(params)
+            return _redirect_with_owner(request, url=f"/?form_error={quote_plus(msg)}", status_code=303)
+        _insert_job_for_owner(params, owner_key)
     except Exception as exc:
         msg = f"Cannot rerun build: {exc}"
-        return RedirectResponse(url=f"/?form_error={quote_plus(msg)}", status_code=303)
-    return RedirectResponse(url="/", status_code=303)
+        return _redirect_with_owner(request, url=f"/?form_error={quote_plus(msg)}", status_code=303)
+    return _redirect_with_owner(request)
 
 
 @app.websocket("/ws/logs/{job_id}")
 async def ws_logs(websocket: WebSocket, job_id: int):
     await websocket.accept()
     try:
-        job = db.get_job(job_id)
+        owner_key = ownership.get_request_owner_key(websocket)
+        job = db.get_job(job_id, owner_key=owner_key)
         if not job:
             await websocket.send_text("Job not found")
             await websocket.close()
@@ -5412,7 +5608,7 @@ async def ws_logs(websocket: WebSocket, job_id: int):
                 await asyncio.wait_for(websocket.receive_text(), timeout=0.5)
             except asyncio.TimeoutError:
                 pass
-            job = db.get_job(job_id)
+            job = db.get_job(job_id, owner_key=owner_key)
             if job:
                 payload = {
                     "type": "progress",

@@ -1026,6 +1026,30 @@ def test_generate_benchmark_sameas_non_wikidata_uses_value_candidates(monkeypatc
     assert "https://www.wikidata.org/entity/Q17146713" in vals
 
 
+def test_custom_wdqs_label_alignment_skips_raw_value_prefilter(monkeypatch):
+    captured = {}
+
+    def _fetch_target_values(*args, **kwargs):
+        captured["args"] = args
+        captured.update(kwargs)
+        return {"louvre": [("Louvre Museum", "http://www.wikidata.org/entity/Q19675")]}
+
+    monkeypatch.setattr(pipeline.align, "fetch_target_values", _fetch_target_values)
+
+    out = pipeline._fetch_target_values_for_alignment(
+        target_property="rdfs:label",
+        target_class="Q33506",
+        target_prop_class=None,
+        target_endpoint="custom",
+        target_endpoint_url="https://query.wikidata.org/bigdata/namespace/wdq/sparql",
+        target_prefixes="PREFIX wd: <http://www.wikidata.org/entity/>",
+        wdc_map={"louvre": [("Louvre-Museum", "wdc1")]},
+    )
+
+    assert out
+    assert "value_candidates" not in captured
+
+
 def test_generate_benchmark_sameas_or_property_combines_matches(monkeypatch):
     class_name = "TestClassSameAsOrProperty"
     _write_test_parts(class_name)

@@ -420,7 +420,22 @@ def _fetch_target_values_for_alignment(
     wdc_map=None,
 ):
     candidate_values = _distinct_wdc_values(wdc_map)
-    if candidate_values:
+    use_value_candidates = bool(candidate_values)
+    endpoint_key = align.normalize_target_endpoint_key(target_endpoint)
+    endpoint_url = str(target_endpoint_url or "").strip().lower()
+    normalized_prop = str(align.normalize_target_property(target_property, endpoint_key) or "").strip().lower()
+    normalized_class = str(align.normalize_target_class(target_class, endpoint_key) or "").strip()
+    custom_wdqs_label_query = (
+        endpoint_key == "custom"
+        and "wikidata.org" in endpoint_url
+        and normalized_prop in {"rdfs:label", "<http://www.w3.org/2000/01/rdf-schema#label>"}
+        and bool(normalized_class)
+    )
+    if custom_wdqs_label_query:
+        # Match native Wikidata behavior: fetch class labels, then align after
+        # local normalization. Raw VALUES prefilters are too strict for labels.
+        use_value_candidates = False
+    if use_value_candidates:
         try:
             return align.fetch_target_values(
                 target_property,

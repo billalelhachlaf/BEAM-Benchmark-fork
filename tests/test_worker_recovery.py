@@ -32,6 +32,24 @@ def test_extract_batch_progress_parses_done_total():
     assert total2 is None
 
 
+def test_log_message_cleanup_translation_and_part_context():
+    raw = "\x1b[0;34m📊 Extraction directe depuis les parts (sans graphe fusionné)...\x1b[0m"
+    cleaned = worker_run._clean_log_message(raw)
+    assert worker_run._translate_log_message(cleaned) == "📊 Direct extraction from parts..."
+
+    assert worker_run._clean_log_message("\x1b[0;34m") == ""
+    assert worker_run._extract_part_name("📄 Scan: part_0001.nq") == "part_0001.nq"
+    assert worker_run._extract_part_name("[WDC] depth=0 file=part_0 10.0%") == "part_0"
+    assert (
+        worker_run._with_part_context(
+            "Lines read: 10 | Matches: 2 | Distinct values: 2",
+            "part_0001.nq",
+        )
+        == "Lines read: 10 | Matches: 2 | Distinct values: 2 | part: part_0001.nq"
+    )
+    assert worker_run._with_part_context("[WDC] file=part_0 done", "part_0") == "[WDC] file=part_0 done"
+
+
 def test_should_mark_job_stuck():
     now = time.time()
     assert worker_run._should_mark_job_stuck(now - 200, now, 180) is True

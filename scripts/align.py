@@ -903,6 +903,8 @@ def normalize_target_class(target_class, target_endpoint="wikidata"):
         return raw
     if raw.startswith("http://") or raw.startswith("https://"):
         return f"<{raw}>"
+    if key == "custom" and re.match(r"^[Qq]\d+$", raw):
+        return "wd:" + raw.upper()
     return raw
 
 
@@ -917,11 +919,24 @@ def normalize_target_property(target_property, target_endpoint="wikidata"):
         return raw
     if raw.startswith("http://") or raw.startswith("https://"):
         return f"<{raw}>"
+    if key == "custom" and re.match(r"^[Pp]\d+$", raw):
+        return "wdt:" + raw.upper()
     low = raw.lower()
     alias = (NON_WIKIDATA_PROPERTY_ALIASES.get(key) or {}).get(low)
     if alias:
         return alias
     return raw
+
+
+def _looks_like_wikidata_class_ref(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return False
+    if raw.startswith("wd:Q"):
+        return True
+    if raw.startswith("<") and raw.endswith(">"):
+        raw = raw[1:-1].strip()
+    return bool(re.match(r"^https?://www\.wikidata\.org/entity/Q\d+$", raw))
 
 
 def _target_phone_fallback_properties(target_endpoint="wikidata"):
@@ -973,6 +988,26 @@ def render_prefix_declarations(prefix_text):
     if not rows:
         return ""
     return "\n".join(rows)
+
+
+def render_custom_prefix_declarations(prefix_text, reserved_prefixes=None):
+    rows = normalize_prefix_declarations(prefix_text)
+    if not rows:
+        return ""
+    reserved = {
+        str(prefix or "").strip().lower()
+        for prefix in (reserved_prefixes or [])
+        if str(prefix or "").strip()
+    }
+    if not reserved:
+        return "\n".join(rows)
+    filtered = []
+    for row in rows:
+        match = _PREFIX_DECL_RE.match(row)
+        if match and match.group(1).strip().lower() in reserved:
+            continue
+        filtered.append(row)
+    return "\n".join(filtered)
 
 
 def extract_target_entity_iri(value, target_endpoint="wikidata", target_endpoint_url=None):
@@ -2612,7 +2647,13 @@ def fetch_target_values(
 
     class_filter = ""
     if class_norm:
-        class_filter = f"""
+        if endpoint_key == "custom" and _looks_like_wikidata_class_ref(class_norm):
+            class_filter = f"""
+      ?entity wdt:P31 ?type .
+      ?type wdt:P279* {class_norm} .
+    """
+        else:
+            class_filter = f"""
       ?entity rdf:type ?type .
       ?type rdfs:subClassOf* {class_norm} .
     """
@@ -2628,10 +2669,14 @@ def fetch_target_values(
     SELECT ?entity ?value WHERE {{
       {values_filter}
       {property_triple}
+      {value_filter}
       {class_filter}
     }}
     """
-    custom_prefixes = render_prefix_declarations(target_prefixes)
+    custom_prefixes = render_custom_prefix_declarations(
+        target_prefixes,
+        reserved_prefixes={"rdf", "rdfs", "schema", "dbo", "dbp", "yago"},
+    )
 
     try:
         max_attempts = max(1, int(os.environ.get("TARGET_QUERY_MAX_RETRIES", "3")))
@@ -2646,25 +2691,35 @@ def fetch_target_values(
         
         def _build_values_filter(entity_batch=None, value_batch=None):
             chunks = []
+            filters = []
             if entity_batch:
                 values = " ".join(f"<{uri}>" for uri in entity_batch)
                 chunks.append(f"VALUES ?entity {{ {values} }}")
             if value_batch:
+                values = [str(raw or "").strip() for raw in value_batch if str(raw or "").strip()]
+                all_iris = bool(values) and all(_is_absolute_iri(value) for value in values)
                 rendered = []
-                for raw in value_batch:
-                    value = str(raw or "").strip()
-                    if not value:
-                        continue
+                for value in values:
                     if _is_absolute_iri(value):
-                        if value.startswith("<") and value.endswith(">"):
+                        if all_iris and value.startswith("<") and value.endswith(">"):
                             rendered.append(value)
-                        else:
+                        elif all_iris:
                             rendered.append(f"<{value}>")
+                        else:
+                            rendered.append(_sparql_quote_literal(value.strip("<>")))
                     else:
                         rendered.append(_sparql_quote_literal(value))
-                values = " ".join(rendered)
-                chunks.append(f"VALUES ?value {{ {values} }}")
-            return ("\n".join(chunks) + "\n") if chunks else ""
+                values_text = " ".join(rendered)
+                if all_iris:
+                    chunks.append(f"VALUES ?value {{ {values_text} }}")
+                else:
+                    # Compare lexical values so language-tagged literals such as
+                    # Wikidata labels ("Museum"@en) match plain WDC strings.
+                    chunks.append(f"VALUES ?valueText {{ {values_text} }}")
+                    filters.append("FILTER(STR(?value) = ?valueText)")
+            values_filter = ("\n".join(chunks) + "\n") if chunks else ""
+            value_filter = ("\n".join(filters) + "\n") if filters else ""
+            return values_filter, value_filter
 
         if entity_iris_sorted and len(entity_iris_sorted) > entity_batch_size:
             batches = list(_chunk_list(entity_iris_sorted, entity_batch_size))
@@ -2672,11 +2727,15 @@ def fetch_target_values(
                 f"   Batching entities: {len(entity_iris_sorted):,} IRIs in {len(batches)} batches (size={entity_batch_size})"
             )
             for idx, entity_batch in enumerate(batches, 1):
-                values_filter = _build_values_filter(entity_batch=entity_batch, value_batch=value_candidates_sorted)
+                values_filter, value_filter = _build_values_filter(
+                    entity_batch=entity_batch,
+                    value_batch=value_candidates_sorted,
+                )
                 batch_query = query_template.format(
                     custom_prefixes=custom_prefixes,
                     values_filter=values_filter,
                     property_triple=property_triple,
+                    value_filter=value_filter,
                     class_filter=class_filter,
                 )
                 print(f"   [TARGET] batch {idx}/{len(batches)} size={len(entity_batch)}")
@@ -2698,11 +2757,15 @@ def fetch_target_values(
                 f"   Batching values: {len(value_candidates_sorted):,} values in {len(batches)} batches (size={entity_batch_size})"
             )
             for idx, value_batch in enumerate(batches, 1):
-                values_filter = _build_values_filter(entity_batch=entity_iris_sorted, value_batch=value_batch)
+                values_filter, value_filter = _build_values_filter(
+                    entity_batch=entity_iris_sorted,
+                    value_batch=value_batch,
+                )
                 batch_query = query_template.format(
                     custom_prefixes=custom_prefixes,
                     values_filter=values_filter,
                     property_triple=property_triple,
+                    value_filter=value_filter,
                     class_filter=class_filter,
                 )
                 print(f"   [TARGET] value-batch {idx}/{len(batches)} size={len(value_batch)}")
@@ -2719,11 +2782,15 @@ def fetch_target_values(
                     if isinstance(batch_bindings, list):
                         bindings.extend(batch_bindings)
         else:
-            values_filter = _build_values_filter(entity_batch=entity_iris_sorted, value_batch=value_candidates_sorted)
+            values_filter, value_filter = _build_values_filter(
+                entity_batch=entity_iris_sorted,
+                value_batch=value_candidates_sorted,
+            )
             query = query_template.format(
                 custom_prefixes=custom_prefixes,
                 values_filter=values_filter,
                 property_triple=property_triple,
+                value_filter=value_filter,
                 class_filter=class_filter,
             )
             results = _run_sparql_query_with_retry_to_endpoint(

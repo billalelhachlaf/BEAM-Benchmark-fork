@@ -415,6 +415,11 @@ def test_normalize_target_property_maps_common_aliases_for_non_wikidata():
     assert align.normalize_target_property("P1329", "yago") == "schema:telephone"
 
 
+def test_normalize_custom_endpoint_accepts_wikidata_qid_and_pid():
+    assert align.normalize_target_class("Q33506", "custom") == "wd:Q33506"
+    assert align.normalize_target_property("P212", "custom") == "wdt:P212"
+
+
 def test_fetch_target_values_supports_value_candidates_for_sameas(monkeypatch):
     captured = {}
 
@@ -468,6 +473,48 @@ def test_fetch_target_values_quotes_literal_value_candidates(monkeypatch):
     )
 
     assert out == {}
-    assert "VALUES ?value" in captured["query"]
+    assert "VALUES ?valueText" in captured["query"]
+    assert "FILTER(STR(?value) = ?valueText)" in captured["query"]
     assert '"+33 1 40 20 50 50"' in captured["query"]
     assert "<+33 1 40 20 50 50>" not in captured["query"]
+
+
+def test_fetch_target_values_custom_matches_language_tagged_literals(monkeypatch):
+    captured = {}
+
+    def _fake_runner(endpoint_url, query, headers, timeout_s, max_attempts, base_delay):
+        captured["query"] = query
+        return {
+            "results": {
+                "bindings": [
+                    {
+                        "entity": {"value": "http://www.wikidata.org/entity/Q123"},
+                        "value": {"value": "Kern Valley Museum", "xml:lang": "en"},
+                    }
+                ]
+            }
+        }
+
+    monkeypatch.setattr(align, "_run_sparql_query_with_retry_to_endpoint", _fake_runner)
+
+    out = align.fetch_target_values(
+        target_property="rdfs:label",
+        target_class="Q33506",
+        target_endpoint="custom",
+        target_endpoint_url="https://query.wikidata.org/bigdata/namespace/wdq/sparql",
+        target_prefixes=(
+            "PREFIX wd: <http://www.wikidata.org/entity/>\n"
+            "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>"
+        ),
+        value_candidates=["Kern Valley Museum"],
+    )
+
+    assert "VALUES ?valueText" in captured["query"]
+    assert "FILTER(STR(?value) = ?valueText)" in captured["query"]
+    assert "wd:Q33506" in captured["query"]
+    assert "wdt:P31" in captured["query"]
+    assert "wdt:P279*" in captured["query"]
+    assert captured["query"].count("PREFIX rdfs:") == 1
+    norm = align.normalize_country_code(align.normalize_value_for_matching("Kern Valley Museum"))
+    assert norm in out
+    assert out[norm][0][1] == "http://www.wikidata.org/entity/Q123"

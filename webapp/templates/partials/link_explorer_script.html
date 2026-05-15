@@ -258,17 +258,23 @@
       const pairSet = new Set();
       const leftSet = new Set();
       const rightSet = new Set();
+      const leftRaw = new Map();
+      const rightRaw = new Map();
       (Array.isArray(state.linkingCombinations) ? state.linkingCombinations : []).forEach((combo) => {
         (Array.isArray(combo && combo.pairs) ? combo.pairs : []).forEach((pair) => {
+          const leftText = String(pair && pair.wdc || '').trim();
+          const rightText = String(pair && pair.target || '').trim();
           const left = canonicalPropKey(pair && pair.wdc);
           const right = canonicalPropKey(pair && pair.target);
           if (!left || !right) return;
           leftSet.add(left);
           rightSet.add(right);
           pairSet.add(`${left}=>${right}`);
+          if (leftText && !leftRaw.has(left)) leftRaw.set(left, leftText);
+          if (rightText && !rightRaw.has(right)) rightRaw.set(right, rightText);
         });
       });
-      return { pairSet, leftSet, rightSet };
+      return { pairSet, leftSet, rightSet, leftRaw, rightRaw };
     }
 
     function sampleToValues(sample) {
@@ -315,6 +321,8 @@
           configuredPair: configured.pairSet.has(`${canonicalPropKey(left)}=>${canonicalPropKey(right)}`),
           configuredLeft: configured.leftSet.has(canonicalPropKey(left)),
           configuredRight: configured.rightSet.has(canonicalPropKey(right)),
+          configuredLeftAs: configured.leftRaw.get(canonicalPropKey(left)) || '',
+          configuredRightAs: configured.rightRaw.get(canonicalPropKey(right)) || '',
         });
       });
 
@@ -335,6 +343,8 @@
           configuredPair: false,
           configuredLeft: configured.leftSet.has(canonicalPropKey(item.prop)),
           configuredRight: false,
+          configuredLeftAs: configured.leftRaw.get(canonicalPropKey(item.prop)) || '',
+          configuredRightAs: '',
         });
       });
       rightRows.forEach((item) => {
@@ -354,6 +364,8 @@
           configuredPair: false,
           configuredLeft: false,
           configuredRight: configured.rightSet.has(canonicalPropKey(item.prop)),
+          configuredLeftAs: '',
+          configuredRightAs: configured.rightRaw.get(canonicalPropKey(item.prop)) || '',
         });
       });
 
@@ -522,13 +534,17 @@
       bindNodeTreeEvents(detailsEl);
     }
 
-    function renderCell(prop, values, label, description, side, configured = false) {
+    function renderCell(prop, values, label, description, side, configured = false, configuredAs = '') {
       if (!prop) return '<span class="empty">-</span>';
       const title = propertyTitle(prop, label, description);
+      const configuredText = String(configuredAs || '').trim();
+      const badge = configured
+        ? (configuredText ? `used for linking: ${escapeHtml(configuredText)}` : 'used for linking')
+        : '';
       return `
         <span class="cell-prop-row">
           <span class="cell-prop">${escapeHtml(title)}</span>
-          ${configured ? '<span class="cell-prop-badge">used for linking</span>' : ''}
+          ${configured ? `<span class="cell-prop-badge">${badge}</span>` : ''}
         </span>
         <div class="cell-values">${renderValueList(values, side, 0)}</div>
       `;
@@ -565,8 +581,8 @@
           <tbody>
             ${rows.map((r) => `
               <tr class="${r.configuredPair ? 'configured-pair' : ''}">
-                <td>${renderCell(r.left, r.leftValues, r.leftLabel, r.leftDescription, r.leftSide, r.configuredLeft || r.configuredPair)}</td>
-                <td>${renderCell(r.right, r.rightValues, r.rightLabel, r.rightDescription, r.rightSide, r.configuredRight || r.configuredPair)}</td>
+                <td>${renderCell(r.left, r.leftValues, r.leftLabel, r.leftDescription, r.leftSide, r.configuredLeft || r.configuredPair, r.configuredLeftAs)}</td>
+                <td>${renderCell(r.right, r.rightValues, r.rightLabel, r.rightDescription, r.rightSide, r.configuredRight || r.configuredPair, r.configuredRightAs)}</td>
               </tr>
             `).join('')}
           </tbody>

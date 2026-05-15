@@ -50,6 +50,8 @@ Recommended user path:
 - Developer index: [dev/README.md](dev/README.md)
 - How to modify code safely: [dev/how_to_modify_code.md](dev/how_to_modify_code.md)
 - API and route map: [dev/api_route_map.md](dev/api_route_map.md)
+- Detailed code presentation: [dev/presentation_code.md](dev/presentation_code.md)
+- Modifiable code areas: [dev/code_a_modifier.md](dev/code_a_modifier.md)
 
 ## 6. Verification and Demonstration Assets
 

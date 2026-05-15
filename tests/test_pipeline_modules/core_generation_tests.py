@@ -167,6 +167,22 @@ def test_generate_benchmark_with_local_test_parts(monkeypatch):
     assert with_link["wd_raw_cache_path"] == without["wd_raw_cache_path"]
 
 
+def test_local_parts_range_selection_does_not_fall_back_to_all():
+    class_dir = Path("Download") / "RangeClass"
+    class_dir.mkdir(parents=True, exist_ok=True)
+    for idx in range(13):
+        (class_dir / f"part_{idx:04d}.nq").write_text(
+            f"<http://example.org/s{idx}> <http://schema.org/name> \"Name {idx}\" .\n",
+            encoding="utf-8",
+        )
+
+    selected = pipeline._select_local_part_files(str(class_dir), "0-10")
+
+    assert [Path(p).name for p in selected] == [f"part_{idx:04d}.nq" for idx in range(11)]
+    assert "part_0011.nq" not in {Path(p).name for p in selected}
+    assert "part_0012.nq" not in {Path(p).name for p in selected}
+
+
 def test_generate_benchmark_strict_duplicate_key_filter_writes_reports(monkeypatch):
     _write_test_parts("TestClass")
     _install_test_stubs(monkeypatch)
@@ -928,5 +944,4 @@ def test_generate_benchmark_wikidata_mode_fails_when_no_wd_urls(monkeypatch):
             },
             workers=1,
         )
-
 

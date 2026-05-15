@@ -165,13 +165,11 @@ function updateReadyChecklist() {
       ? (targetEndpointUrl || 'Custom endpoint URL is required.')
       : targetEndpoint,
   });
-  if (includesSameAs) {
-    items.push({
-      label: 'Target class filter set',
-      ok: !!targetClass,
-      detail: targetClass ? targetClass : 'Required in sameAs mode.',
-    });
-  }
+  items.push({
+    label: 'Target class filter set',
+    ok: !!targetClass,
+    detail: targetClass ? targetClass : 'Required for every job.',
+  });
   if (!urlMode) {
     items.push({
       label: 'Equivalent target property set',
@@ -447,7 +445,7 @@ function updateRequiredIndicators() {
   setRequiredState('class-name-select', 'required-class-name', true);
   setRequiredState('wdc-pattern-input', 'required-wdc-pattern', true);
   setRequiredState('wikidata-property-input', 'required-wikidata-property', !isWikidata && !hasRules);
-  setRequiredState('wkd-class-input', 'required-wkd-class', includesSameAs);
+  setRequiredState('wkd-class-input', 'required-wkd-class', true);
   setRequiredState('target-endpoint-url-input', 'required-target-endpoint-url', isCustomTargetEndpointSelected());
 }
 
@@ -560,6 +558,7 @@ function validateGenerateForm(opts = {}) {
   if (!className) return 'Class name is required.';
   if (!pattern && !propertyMappingRules) return 'Considered pattern for WDC properties is required.';
   if (targetEndpoint === 'custom' && !targetEndpointUrl) return 'Custom endpoint URL is required.';
+  if (requireWikidataInputs && !targetClass) return 'Target class filter is required.';
   if (propertyMappingRules) {
     const lines = propertyMappingRules.split('\n').map((line) => normalizeFormText(line)).filter((line) => line);
     for (let i = 0; i < lines.length; i += 1) {
@@ -603,10 +602,8 @@ function validateGenerateForm(opts = {}) {
   }
   if (!requireWikidataInputs) return '';
   if (isWikidata) {
-    if (!targetClass) return 'Target class filter is required when using sameAs mode.';
     return '';
   }
-  if (includesSameAs && !targetClass) return 'Target class filter is required when sameAs mode is enabled.';
   if (!targetProperty && !propertyMappingRules) return 'Equivalent target property is required when WDC values are not endpoint URLs.';
   return '';
 }

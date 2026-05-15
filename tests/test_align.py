@@ -30,6 +30,13 @@ def test_retryable_query_error_detection():
     assert not align._is_retryable_query_error(Exception("invalid query syntax"))
 
 
+def test_parse_parts_spec_preserves_available_part_padding():
+    available = [f"part_{i:04d}.gz" for i in range(13)]
+
+    assert align.parse_parts_spec("0-10", available) == [f"part_{i:04d}.gz" for i in range(11)]
+    assert "part_0011.gz" not in align.parse_parts_spec("0-10", available)
+
+
 def test_parse_strip_list_supports_named_tokens():
     chars = align.parse_strip_list("spaces;dot;semicolon;hyphen;comma;slash;underscore")
     assert " " in chars

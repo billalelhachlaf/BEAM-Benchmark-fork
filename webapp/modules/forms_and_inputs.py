@@ -445,16 +445,15 @@ def _validate_and_normalize_job_params(raw_params: dict):
     effective_includes_sameas = includes_sameas or rules_include_sameas
     effective_includes_property = includes_property if not parsed_rules else rules_include_property
 
+    if not params["target_class"]:
+        return params, "Target class filter is required."
+
     if mode == "sameas" and not parsed_rules:
         params["target_property"] = ""
         params["wikidata_property"] = ""
         params["ignore_chars"] = ""
         params["property_mapping_rules"] = ""
-        if not params["target_class"]:
-            return params, "Target class filter is required when using sameAs mode."
     else:
-        if effective_includes_sameas and not params["target_class"]:
-            return params, "Target class filter is required when sameAs mode is enabled."
         if not params["wdc_predicate_pattern"] and not parsed_rules:
             return params, "Considered pattern for WDC properties is required."
         if effective_includes_property and not params["ignore_chars"]:
@@ -769,5 +768,4 @@ def _select_local_part_files(class_name: str, parts_spec: str):
     if not selected:
         warnings.append("No local part file matches this parts spec.")
     return selected, warnings
-
 

@@ -443,6 +443,26 @@ def test_create_job_requires_wikidata_property_when_not_url_mode(monkeypatch, te
     assert jobs == []
 
 
+def test_create_job_requires_target_class_filter(monkeypatch, test_wdc_classes):
+    client, web_main = _client_with_test_classes(monkeypatch, test_wdc_classes)
+    form = {
+        "matching_mode": "property",
+        "class_name": "TestClass",
+        "parts_spec": "all",
+        "wdc_predicate_pattern": "name",
+        "wikidata_property": "rdfs:label",
+        "wkd_class": "",
+        "ignore_chars": "spaces;-;.",
+    }
+    with client:
+        resp = client.post("/jobs", data=form, follow_redirects=False)
+
+    assert resp.status_code == 303
+    location = resp.headers.get("location") or ""
+    assert "form_error=" in location
+    assert web_main.db.list_jobs(limit=10) == []
+
+
 def test_create_job_url_mode_clears_wikidata_property(monkeypatch, test_wdc_classes):
     client, web_main = _client_with_test_classes(monkeypatch, test_wdc_classes)
     form = {
@@ -918,5 +938,4 @@ def test_build_without_done_marker_is_hidden_and_inaccessible(monkeypatch, test_
     assert detail.status_code == 303
     assert links_page.status_code == 303
     assert links_api.status_code == 404
-
 

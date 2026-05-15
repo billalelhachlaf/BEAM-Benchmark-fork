@@ -39,20 +39,30 @@ def _count_local_parts(download_dir):
     return count
 
 
+def _part_number_from_filename(name):
+    m = re.search(r"part_0*(\d+)", str(name or ""))
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
 def _select_local_part_files(download_dir, parts_spec):
     files = [Path(p) for p in _discover_wdc_files(download_dir)]
     if not files:
         return []
     if (parts_spec or "").lower() == "all":
         return files
-    wanted_parts = set(align.parse_parts_spec(parts_spec, available_parts=None))
+    wanted_parts = {
+        _part_number_from_filename(name)
+        for name in align.parse_parts_spec(parts_spec, available_parts=None)
+    }
+    wanted_parts.discard(None)
     selected = []
     for fp in files:
-        name = fp.name
-        if not name.startswith("part_"):
-            continue
-        base = name.split(".", 1)[0]
-        if f"{base}.gz" in wanted_parts:
+        if _part_number_from_filename(fp.name) in wanted_parts:
             selected.append(fp)
     return selected
 
@@ -821,5 +831,4 @@ def _fast_subject_key_from_nq_line(line):
             return None
         return line[:sep]
     return None
-
 

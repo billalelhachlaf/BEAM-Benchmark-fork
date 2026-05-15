@@ -20,10 +20,10 @@ Open:
 - or `http://<server-ip-or-domain>`
 
 Main UI routes:
-- `http://<host>/app/create` (Create Run wizard)
-- `http://<host>/app/jobs` (active/queued/running jobs)
-- `http://<host>/app/history` (completed builds and actions)
-- `http://<host>/tutorial` (in-app tutorial)
+- `http://<host>/app/create` (configure and launch a run)
+- `http://<host>/app/jobs` (monitor active jobs)
+- `http://<host>/app/history` (review completed builds)
+- `http://<host>/tutorial` (user guide)
 
 Stop:
 
@@ -64,7 +64,7 @@ Expected:
 - Verification and quality gates: [docs/verification/README.md](docs/verification/README.md)
 - Current limits: [docs/limits.md](docs/limits.md)
 - Docker deployment guide: [docs/admin/docker_deploy.md](docs/admin/docker_deploy.md)
-- In-app tutorial: `/tutorial`
+- User guide: `/tutorial`
 
 ## What Runs In This Project
 
@@ -129,7 +129,7 @@ pytest -q
 
 ## Where To Read Next
 
-Source of truth for user flow:
+Main user guide:
 - [docs/user/tutorial.md](docs/user/tutorial.md) (also rendered in UI at `/tutorial`)
 
 Recommended paths by audience:

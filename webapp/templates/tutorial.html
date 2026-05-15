@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BEAM Tutorial</title>
+  <title>BEAM-App Tutorial</title>
   <style>
     :root{--bg:#0e1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e}
     *{box-sizing:border-box}
@@ -39,11 +39,6 @@
     {% set active_tab = 'tutorial' %}
     {% set shell_subtitle = '' %}
     {% include 'partials/app_shell_topbar.html' %}
-    <h1>Tutorial</h1>
-
-    <div class="card">
-      <div class="small">Source: <code>{{ tutorial_source_path }}</code></div>
-    </div>
 
     <div class="tutorial-layout">
       <aside class="tutorial-sidebar">
